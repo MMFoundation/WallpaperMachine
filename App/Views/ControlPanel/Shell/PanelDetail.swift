@@ -54,7 +54,7 @@ struct PanelDetail: View {
       .animation(columnAnimation, value: shell.areFiltersShown)
       .animation(columnAnimation, value: shell.isInspectorShown)
     }
-    .background { theme.surface.background.color.ignoresSafeArea() }
+    .background { WindowGlassBackdrop().ignoresSafeArea() }
     // Under the first-run guide the bare title bar names nothing: the guide is what is on show.
     // The title names the window (the Window menu, Mission Control) but is not drawn in the
     // title bar, where the tabs already say which page is on show.

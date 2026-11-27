@@ -12,6 +12,7 @@ import SwiftUI
 struct InstalledInspector: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     Group {
@@ -27,7 +28,9 @@ struct InstalledInspector: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .background(theme.surface.background.color)
+    .background(
+      theme.isLiquidGlass && !reduceTransparency ? Color.clear : theme.surface.background.color
+    )
     // Every link in the inspector goes through the panel's allowlist.
     .environment(
       \.openURL, OpenURLAction { url in ExternalLink.open(url) ? .handled : .discarded }

@@ -14,22 +14,25 @@ is linked from the domain; the shared limits are collected at the end.
 ## Appearance
 
 - `AppThemeTests` — a chosen theme survives recreation and reset leaves other
-  preferences alone; an invalid change cannot overwrite saved values; a damaged
-  saved accent or an unknown icon does not discard the rest. Halloween week runs
-  from October 24 to November 1 by the local calendar; the Halloween choice decides
-  when the look and its Dock icon are on, a day change while the app runs starts and
-  ends it, and reset returns to Halloween week.
-- `AppIconImageTests` — every Dock icon, the Halloween one included, loads sharp from
+  preferences alone; an invalid accent or transparency cannot overwrite saved values; a
+  damaged saved value does not discard the rest. Halloween week (October 24 to November 1)
+  and Christmas week (December 18 to December 26) follow the local calendar; the seasonal
+  choices decide when each look and its Dock icon are on, choosing Always for one clears
+  Always on the other, a day change while the app runs starts and ends them, and reset
+  returns to automatic seasonal weeks and Solid window style.
+- `AppIconImageTests` — every Dock icon, Halloween and Christmas included, loads sharp from
   the bundle as its own artwork.
 - `AppearanceSettingsTests` and `PanelShellActionsTests` (Panel) save every
-  Appearance choice (mode, accent, tone, icon, Halloween look) in the store's format,
-  refuse an invalid accent, round-trip accents through the colour well and reset
-  without touching unrelated preferences; while the Halloween look is on, the window
-  and the Dock wear it and the person's own choices are kept. `PanelThemeTests` derive
-  the palettes from the preferences, the season and the resolved appearance, and
-  `SurfacePaletteTests` hold every tone's and the Halloween look's palettes to the
-  contrast floor, and keep what lies over a picture (scrims, mark and ring discs, a mark's trophy
-  and heart, a tile's controls) the same in every look and readable over a white picture. `PanelFontTests` (Panel) keep the type scale in order from page title to a
+  Appearance choice (mode, accent, tone, window style, glass transparency, icon, Halloween
+  and Christmas looks) in the store's format, refuse invalid values, round-trip accents
+  through the colour well and reset without touching unrelated preferences; while a
+  seasonal look is on, the window and the Dock wear it and the person's own choices are
+  kept. `PanelThemeTests` derive the palettes and Liquid Glass surface opacities (including
+  Reduce Transparency fallback) from the preferences, the season and the resolved
+  appearance, and `SurfacePaletteTests` hold every tone's and every seasonal look's
+  palettes to the contrast floor, and keep what lies over a picture (scrims, mark and ring
+  discs, a mark's trophy and heart, a tile's controls) the same in every look and readable
+  over a white picture. `PanelFontTests` (Panel) keep the type scale in order from page title to a
   tile's mark with no words under 10 points, and check that what AppKit measures with a role's
   `nsFont` and `lineHeight` is what SwiftUI draws: the caption height the Library grid reserves
   under a tile, and the room a property row keeps for its Modified or Not applied pill; an

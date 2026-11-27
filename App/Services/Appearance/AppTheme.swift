@@ -25,6 +25,18 @@ struct AppThemePreferences: Equatable {
     case always, off
   }
 
+  /// When the window wears the Christmas look (`Season.christmas`).
+  enum Christmas: String {
+    /// During Christmas week only (`Season.christmas.covers(_:in:)`).
+    case automatic
+    case always, off
+  }
+
+  /// How the window's surfaces are drawn: opaque solid surfaces or translucent Liquid Glass.
+  enum WindowStyle: String {
+    case solid, liquidGlass
+  }
+
   enum Icon: String, CaseIterable {
     case minimal, day, night
 
@@ -36,26 +48,38 @@ struct AppThemePreferences: Equatable {
     }
   }
 
+  /// Transparency percentage of the Liquid Glass window: 0 is frosted and opaque-leaning,
+  /// 100 lets the most behind the window show through while keeping text readable.
+  static let glassTransparencyRange = 0...100
+  static let defaultGlassTransparency = 50
+
   var mode: Mode = .system
   var accent = "#80bbff"
   var tone: Tone = .neutral
   var icon: Icon = .day
   var halloween: Halloween = .automatic
+  var christmas: Christmas = .automatic
+  var windowStyle: WindowStyle = .solid
+  var glassTransparency: Int = AppThemePreferences.defaultGlassTransparency
 
   var snapshot: [String: Any] {
     [
       "mode": mode.rawValue, "accent": accent, "tone": tone.rawValue, "icon": icon.rawValue,
-      "halloween": halloween.rawValue,
+      "halloween": halloween.rawValue, "christmas": christmas.rawValue,
+      "windowStyle": windowStyle.rawValue, "glassTransparency": String(glassTransparency),
     ]
   }
 
   /// The seasonal look the window wears on `date` under these choices, nil for the person's own.
   func season(on date: Date, calendar: Calendar) -> Season? {
-    switch halloween {
-    case .automatic: Season.halloween.covers(date, in: calendar) ? .halloween : nil
-    case .always: .halloween
-    case .off: nil
+    if halloween == .always && christmas == .always {
+      return Season.halloween.covers(date, in: calendar) ? .halloween : .christmas
     }
+    if halloween == .always { return .halloween }
+    if christmas == .always { return .christmas }
+    if halloween == .automatic, Season.halloween.covers(date, in: calendar) { return .halloween }
+    if christmas == .automatic, Season.christmas.covers(date, in: calendar) { return .christmas }
+    return nil
   }
 
   /// The 1024-pixel artwork of an asset catalog image set as a 512-point Dock icon.
@@ -77,26 +101,45 @@ struct AppThemePreferences: Equatable {
         (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
       }
   }
+
+  static func validGlassTransparency(_ value: Int) -> Bool {
+    glassTransparencyRange.contains(value)
+  }
+
+  static func parseGlassTransparency(_ raw: String) -> Int? {
+    guard let value = Int(raw), String(value) == raw, validGlassTransparency(value) else {
+      return nil
+    }
+    return value
+  }
 }
 
 /// A look the window wears for a holiday instead of the person's own: its palettes and accent
 /// (`PanelTheme`), the mark beside the traffic lights and the Dock icon. The person's choices are
 /// kept and come back when it ends.
-enum Season: String, Sendable {
+enum Season: String, CaseIterable, Sendable {
   case halloween
+  case christmas
 
   /// The accent while the season is on, fitted for contrast like any other (`AccentPalette`).
-  var accent: String { "#ff7a1a" }
+  var accent: String {
+    switch self {
+    case .halloween: "#ff7a1a"
+    case .christmas: "#d9363e"
+    }
+  }
 
   /// The asset catalog image set of its Dock icon.
   var dockImageName: String { "AppIcon" + rawValue.capitalized }
 
-  /// Whether `date` is in the season's week by the local calendar: October 24 to November 1.
+  /// Whether `date` is in the season's week by the local calendar:
+  /// October 24 to November 1 for Halloween, December 18 to December 26 for Christmas.
   func covers(_ date: Date, in calendar: Calendar) -> Bool {
     let day = calendar.dateComponents([.month, .day], from: date)
-    switch (day.month, day.day) {
-    case (10?, let dayOfMonth?): return dayOfMonth >= 24
-    case (11?, 1?): return true
+    switch (self, day.month, day.day) {
+    case (.halloween, 10?, let dayOfMonth?): return dayOfMonth >= 24
+    case (.halloween, 11?, 1?): return true
+    case (.christmas, 12?, let dayOfMonth?): return (18...26).contains(dayOfMonth)
     default: return false
     }
   }
@@ -108,8 +151,8 @@ final class AppThemeStore: ObservableObject {
   static let shared = AppThemeStore()
   nonisolated static let defaultsKey = "WallpaperMachine.appTheme"
   @Published private(set) var preferences: AppThemePreferences
-  /// The seasonal look in effect, nil for the person's own: `preferences.halloween` read against
-  /// today. It follows the preference, and the date when the day changes.
+  /// The seasonal look in effect, nil for the person's own: the seasonal preferences read against
+  /// today. It follows the preferences, and the date when the day changes.
   @Published private(set) var season: Season?
   private let defaults: UserDefaults
   private let calendar: Calendar
@@ -144,6 +187,27 @@ final class AppThemeStore: ObservableObject {
     {
       preferences.halloween = value
     }
+    if let christmas = saved["christmas"] as? String,
+      let value = AppThemePreferences.Christmas(rawValue: christmas)
+    {
+      preferences.christmas = value
+    }
+    if let windowStyle = saved["windowStyle"] as? String,
+      let value = AppThemePreferences.WindowStyle(rawValue: windowStyle)
+    {
+      preferences.windowStyle = value
+    }
+    if let raw = saved["glassTransparency"] as? String,
+      let value = AppThemePreferences.parseGlassTransparency(raw)
+    {
+      preferences.glassTransparency = value
+    } else if let number = saved["glassTransparency"] as? NSNumber,
+      CFGetTypeID(number) != CFBooleanGetTypeID(),
+      number.doubleValue == Double(number.intValue),
+      AppThemePreferences.validGlassTransparency(number.intValue)
+    {
+      preferences.glassTransparency = number.intValue
+    }
     self.preferences = preferences
     season = preferences.season(on: now(), calendar: calendar)
     // Posted when the calendar day changes, and on waking when it changed during sleep.
@@ -173,15 +237,48 @@ final class AppThemeStore: ObservableObject {
 
   func setIcon(_ icon: AppThemePreferences.Icon) { update { $0.icon = icon } }
 
-  func setHalloween(_ halloween: AppThemePreferences.Halloween) { update { $0.halloween = halloween } }
+  func setHalloween(_ halloween: AppThemePreferences.Halloween) {
+    update {
+      $0.halloween = halloween
+      if halloween == .always, $0.christmas == .always { $0.christmas = .automatic }
+    }
+  }
+
+  func setChristmas(_ christmas: AppThemePreferences.Christmas) {
+    update {
+      $0.christmas = christmas
+      if christmas == .always, $0.halloween == .always { $0.halloween = .automatic }
+    }
+  }
+
+  func setWindowStyle(_ windowStyle: AppThemePreferences.WindowStyle) {
+    update { $0.windowStyle = windowStyle }
+  }
+
+  /// Updates the published transparency during a slider drag without writing defaults on every step.
+  func previewGlassTransparency(_ percent: Int) {
+    guard AppThemePreferences.validGlassTransparency(percent) else { return }
+    guard preferences.glassTransparency != percent else { return }
+    var next = preferences
+    next.glassTransparency = percent
+    preferences = next
+  }
+
+  /// Saves the Liquid Glass transparency percentage (`0...100`); any value outside the range is refused.
+  func setGlassTransparency(_ percent: Int) throws {
+    guard AppThemePreferences.validGlassTransparency(percent) else { throw InvalidControlValue() }
+    update(persistEvenIfUnchanged: true) { $0.glassTransparency = percent }
+  }
 
   /// Saves `change` and publishes it, unless it changes nothing.
-  private func update(_ change: (inout AppThemePreferences) -> Void) {
+  private func update(
+    persistEvenIfUnchanged: Bool = false, _ change: (inout AppThemePreferences) -> Void
+  ) {
     var next = preferences
     change(&next)
-    guard next != preferences else { return }
+    guard persistEvenIfUnchanged || next != preferences else { return }
     defaults.set(next.snapshot, forKey: Self.defaultsKey)
-    preferences = next
+    if next != preferences { preferences = next }
     refreshSeason()
   }
 

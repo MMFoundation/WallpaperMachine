@@ -61,7 +61,7 @@ struct PanelEmptyState<Actions: View>: View {
           title.modifier(EmptyStateSelection(isEnabled: selectsText))
         } icon: {
           if let art, let season = theme.season {
-            SeasonalArtwork(name: art.imageName(in: season))
+            SeasonalArtwork(season: season, name: art.imageName(in: season))
           } else {
             Image(systemName: systemImage)
           }
@@ -88,6 +88,8 @@ enum SeasonalArt {
     switch (season, self) {
     case (.halloween, .emptyLibrary): "HalloweenFrame"
     case (.halloween, .noResults): "HalloweenCat"
+    case (.christmas, .emptyLibrary): "ChristmasFrame"
+    case (.christmas, .noResults): "ChristmasReindeer"
     }
   }
 }
@@ -95,12 +97,14 @@ enum SeasonalArt {
 /// A papercut cameo: the season's silhouette on a strip of ground in front of the full moon, cut out
 /// in a ring of the horizon's ink. The moon carries it on either appearance.
 private struct SeasonalArtwork: View {
+  let season: Season
   let name: String
 
   var body: some View {
-    let ink = SeasonHorizon.ink.color
+    let ink = SeasonHorizon.ink(for: season).color
+    let moon = SeasonHorizon.moon(for: season).color
     ZStack(alignment: .bottom) {
-      SeasonHorizon.moon.color
+      moon
       ink.frame(height: 22)
       Image(name)
         .resizable()
@@ -117,7 +121,7 @@ private struct SeasonalArtwork: View {
       Circle()
         .fill(
           RadialGradient(
-            colors: [SeasonHorizon.moon.color.opacity(0.3), SeasonHorizon.moon.color.opacity(0)],
+            colors: [moon.opacity(0.3), moon.opacity(0)],
             center: .center, startRadius: 66, endRadius: 100))
         .frame(width: 200, height: 200)
     }

@@ -32,6 +32,7 @@ struct SettingsDetail: View {
 struct SettingsPages: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @State private var position = ScrollPosition(edge: .top)
 
   var body: some View {
@@ -39,7 +40,8 @@ struct SettingsPages: View {
     if !settings.search.isActive && settings.selectedSection == .widgets {
       WidgetsWorkspace()
         .id(PageIdentity(section: .widgets, searchSection: nil, epoch: settings.scrollEpoch, query: ""))
-        .background(theme.surface.surface.color, ignoresSafeAreaEdges: [])
+        .background(
+          theme.surfaceFill(reduceTransparency: reduceTransparency), ignoresSafeAreaEdges: [])
     } else {
       pages(settings)
     }
@@ -79,7 +81,7 @@ struct SettingsPages: View {
       epoch: settings.scrollEpoch, query: search.query), initial: true
     ) { position.scrollTo(edge: .top) }
     // Not under the title bar, which keeps the page's colour across the window.
-    .background(theme.surface.surface.color, ignoresSafeAreaEdges: [])
+    .background(theme.surfaceFill(reduceTransparency: reduceTransparency), ignoresSafeAreaEdges: [])
     // A single page and a list of results have different estimated heights.
     // Reset that layout only when entering/leaving search, never while typing.
     .id(search.isActive)

@@ -284,3 +284,26 @@ extension AppThemePreferences.Halloween: CaseIterable {
     }
   }
 }
+
+extension AppThemePreferences.Christmas: CaseIterable {
+  static let allCases: [AppThemePreferences.Christmas] = [.automatic, .always, .off]
+
+  @MainActor var title: String {
+    switch self {
+    case .automatic: L("Christmas week")
+    case .always: L("Always")
+    case .off: L("Off")
+    }
+  }
+}
+
+extension AppThemePreferences.WindowStyle: CaseIterable {
+  static let allCases: [AppThemePreferences.WindowStyle] = [.solid, .liquidGlass]
+
+  @MainActor var title: String {
+    switch self {
+    case .solid: L("Solid")
+    case .liquidGlass: L("Liquid Glass")
+    }
+  }
+}

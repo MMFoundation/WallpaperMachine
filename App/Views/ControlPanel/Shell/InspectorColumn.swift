@@ -15,6 +15,7 @@ struct InspectorColumn<Content: View>: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     let shell = controller.shell
@@ -30,7 +31,7 @@ struct InspectorColumn<Content: View>: View {
       content
         .frame(width: shell.inspectorWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(theme.surface.surface.color)
+        .background(theme.surfaceFill(reduceTransparency: reduceTransparency))
     }
     .accessibilityElement(children: .contain)
     .accessibilityLabel(Text(verbatim: L("Wallpaper details")))

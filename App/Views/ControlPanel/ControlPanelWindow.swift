@@ -34,6 +34,20 @@ enum ControlPanelWindow {
         return window
     }
 
+    /// Configures window opacity for Solid vs Liquid Glass appearance without touching
+    /// `titlebarAppearsTransparent` (which sends narrow scrolling windows into a constraint loop).
+    static func applyWindowStyle(
+        _ style: AppThemePreferences.WindowStyle,
+        to window: NSWindow,
+        reduceTransparency: Bool = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+    ) {
+        let translucent = style == .liquidGlass && !reduceTransparency
+        let targetOpaque = !translucent
+        let targetColor: NSColor = translucent ? .clear : .windowBackgroundColor
+        if window.isOpaque != targetOpaque { window.isOpaque = targetOpaque }
+        if window.backgroundColor != targetColor { window.backgroundColor = targetColor }
+    }
+
     /// Lets go of a closing panel window's content. The toolbar the hosted page bridged in comes
     /// off first: its SwiftUI items (the target-display `Menu` among them) register notification
     /// and key-value observers that are removed only when they leave a window, so a toolbar left on

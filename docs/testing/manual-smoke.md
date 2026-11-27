@@ -109,9 +109,15 @@ was run.
 - [ ] Set an accent and a surface tone; relaunch and confirm both persist.
 - [ ] Try white and black accents, then Reset appearance. Wallpapers and
       playback must not change.
-- [ ] Choose **Always** under Halloween look: the window, the pumpkin beside the
-      traffic lights and the Dock icon change at once, in light and dark; **Off** brings
-      back your own accent, tone and Dock icon.
+- [ ] Choose **Always** under Halloween look and Christmas look: the window, the
+      seasonal mark beside the traffic lights, the papercut horizon and the Dock icon
+      change at once, in light and dark; **Off** brings back your own accent, tone and
+      Dock icon.
+- [ ] Switch **Window style** to **Liquid Glass** and drag the **Window transparency**
+      slider from 0% to 100% over a bright and dark desktop wallpaper: the window shows
+      through smoothly while keeping labels readable, works alongside both everyday tones
+      and seasonal looks, and turns opaque automatically when macOS **Reduce Transparency**
+      is enabled.
 
 ## Library and import
 

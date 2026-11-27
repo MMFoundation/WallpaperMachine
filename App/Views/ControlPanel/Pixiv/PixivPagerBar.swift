@@ -13,6 +13,7 @@ struct PixivPagerBar: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @State private var width: CGFloat = 0
 
   /// Below this the summary sits above the pager.
@@ -93,7 +94,9 @@ struct PixivPagerBar: View {
         width = $0
       }
     }
-    .background(theme.surface.background.color)
+    .background(
+      theme.isLiquidGlass && !reduceTransparency ? Color.clear : theme.surface.background.color
+    )
   }
 
   private var summary: some View {

@@ -10,8 +10,11 @@ playback and display settings are untouched.
 | Appearance | **System (Auto)**, **Light**, **Dark**, each shown as a picture of a window | System follows the macOS light/dark setting as it changes; the choice sets the app's appearance (`NSApp.appearance`), which the panel and every native window follow |
 | Accent color | Nine macOS-style swatches and a color well, with the chosen hex value beside them | The well takes any color the swatches lack and saves once the color has settled for a moment. Colors buttons, links, selection and focus rings |
 | Surface tone | **Neutral**, **Warm**, **Cool**, each shown as a picture of a window | Warms or cools the window background |
+| Window style | **Solid**, **Liquid Glass**, each shown as a picture of a window | Chooses opaque surfaces or a translucent behind-window frosted glass backdrop |
+| Window transparency | 0%–100% slider (default 50%) | Controls how much shows through the Liquid Glass window while keeping labels readable; disabled in Solid mode and stays opaque when macOS **Reduce Transparency** is enabled |
 | App icon | **Minimal**, **Day**, **Night** | Changes the running Dock icon immediately and restores the choice at launch; Finder and the menu bar stay unchanged |
-| Halloween look | **Halloween week**, **Always**, **Off**, each shown as a picture of a window | Halloween week (the default) wears the [Halloween look](#halloween-look) from October 24 to November 1; Always wears it all year; Off never |
+| Halloween look | **Halloween week**, **Always**, **Off**, each shown as a picture of a window | Halloween week (the default) wears the [Halloween look](#seasonal-looks) from October 24 to November 1; Always wears it all year; Off never |
+| Christmas look | **Christmas week**, **Always**, **Off**, each shown as a picture of a window | Christmas week (the default) wears the [Christmas look](#seasonal-looks) from December 18 to December 26; Always wears it all year; Off never |
 
 Accent shades adapt so text, buttons and focus rings stay readable against the
 resolved background. `PanelTheme` (`App/Views/ControlPanel/Theme/`) derives them for
@@ -27,70 +30,79 @@ the resolved appearance flips and when the language does. It reads the appearanc
 macOS resolved and never sets one itself; `AppDelegate` is the only writer of
 `NSApp.appearance`.
 
-## Halloween look
+## Seasonal looks
 
-While the Halloween look is on, the window wears it instead of the person's own tone,
-accent and Dock icon; their choices are kept and come back when it ends. `AppThemeStore`
-reads the **Halloween look** choice against today (`Season.halloween.covers`, the local
-calendar's October 24 to November 1) and publishes the result as `season`. It reads the
-date again when macOS posts `NSCalendarDayChanged`, at midnight or on waking from a sleep
-that crossed one, so the look starts and ends while the app runs; it does no timer or
-per-frame work.
+While a seasonal look (**Halloween** or **Christmas**) is on, the window wears it instead
+of the person's own tone, accent and Dock icon; their choices are kept and come back when
+it ends. `AppThemeStore` reads the seasonal choices against today (`Season.halloween.covers`,
+October 24 to November 1; `Season.christmas.covers`, December 18 to December 26, by the local
+calendar) and publishes the result as `season`. Choosing **Always** for one season returns
+the other season from **Always** to its automatic week so only one seasonal look is forced
+at a time. The store reads the date again when macOS posts `NSCalendarDayChanged`, at
+midnight or on waking from a sleep that crossed one, so each look starts and ends while the
+app runs; it does no timer or per-frame work.
 
 - **Palettes.** `PanelTheme` takes the season's surfaces and accent: `SurfacePalette`
-  has a Halloween column beside the tones (moonlit ink in the dark, candlelit parchment
-  in the light) and `AccentPalette` fits the pumpkin orange `#ff7a1a` like any accent.
-  Light, dark and System still follow the **Appearance** choice.
-- **Mark and Dock icon.** A jack-o'-lantern takes the gear's place: in the title bar's
-  mark (`AppMark`, in the accent's graphic shade) and in the Dock, where `AppDelegate`
-  shows `AppThemeStore.dockIconName`, the `AppIconHalloween` image set while the look is
-  on. Settings › About and the first welcome page show the same icon.
-- **Papercut horizon.** Every picture of the look is cut from one sheet of Victorian
-  papercut silhouettes in two inks, night ink and pumpkin glow (the `Halloween…` image
-  sets). `SeasonHorizon` stands them on rolling hills under a low moon, harvest orange
-  over a light window and cream in the dark. Across the window, a band of it sits on the
-  Now Playing bar, which turns the horizon's ink in either appearance so the hills rise
-  from it; its contents take the look's dark palette, and its popovers the window's own.
-  The horizon draws once per size: still images and a path, no animation.
-- **Settings and empty states.** Settings › Appearance leads with the look's group under
-  the same horizon at banner size, under a night sky, and locks the surface tone, accent
-  and app icon rows it stands in for. The empty Library, and a Library or Workshop search
-  or filters that match nothing, show a papercut cameo (an empty easel, a cat with a
-  question-mark tail) in front of the moon instead of their symbol
-  (`PanelEmptyState.seasonalArt`); an error keeps its symbol. The look's cards in
-  Settings carry its moon and hills.
-
-The silhouette sheet was generated with OpenAI's GPT Image 2.5 (Flare) on fal.ai, and
-its ink and glow were separated from the white paper; each file carries its origin and
-the prompt in its image comment.
+  has Halloween and Christmas columns beside the tones (Halloween: moonlit ink in the dark,
+  candlelit parchment in the light, pumpkin orange `#ff7a1a`; Christmas: evergreen winter
+  night in the dark, snow-lit pine mist in the light, holly crimson `#d9363e`) and
+  `AccentPalette` fits each seasonal accent like any other. Light, dark, System, and Liquid
+  Glass window style still follow their own choices.
+- **Mark and Dock icon.** A seasonal emblem takes the gear's place: a jack-o'-lantern for
+  Halloween and an evergreen tree crowned with a star for Christmas, in both the title bar's
+  mark (`AppMark`) and in the Dock, where `AppDelegate` shows `AppThemeStore.dockIconName`
+  (`AppIconHalloween` or `AppIconChristmas`). Settings › About and the first welcome page
+  show the same icon.
+- **Papercut horizon.** Every picture of a look is cut from two-ink Victorian papercut
+  silhouettes (`Halloween…` and `Christmas…` image sets). `SeasonHorizon` stands them on
+  rolling hills under a low moon (with bats for Halloween and Santa's sleigh with still
+  winter stars for Christmas). Across the window, a band of it sits on the Now Playing bar,
+  which turns the horizon's ink in either appearance so the hills rise from it; its contents
+  take the look's dark palette, and its popovers the window's own. The horizon draws once
+  per size: still images and a path, no animation.
+- **Settings and empty states.** Settings › Appearance leads with the seasonal group under
+  the active season's horizon at banner size, under a night sky, and locks the surface tone,
+  accent and app icon rows it stands in for. The empty Library, and a Library or Workshop
+  search or filters that match nothing, show a papercut cameo (Halloween: empty easel and
+  cat; Christmas: holly easel and stag reindeer) in front of the moon instead of their
+  symbol (`PanelEmptyState.seasonalArt`); an error keeps its symbol. Each seasonal row's
+  cards in Settings carry its moon and hills.
 
 ## Window material
 
-The window's materials are the system's own. The window has a full-size content view
-and the toolbar is the window's own. macOS 26 draws a band under the see-through title
-bar for each column of a window, and draws it by what the column holds: opaque grey over
-a column that does not start with a scroll view, a light wash over one that does, its own
-dark band over the system inspector column. So the window has one column: the page and
-the inspector beside it sit in one full-width scroll view that never scrolls
+By default (**Solid**), the window's materials are the system's own. The window has a
+full-size content view and the toolbar is the window's own. macOS 26 draws a band under the
+see-through title bar for each column of a window, and draws it by what the column holds:
+opaque grey over a column that does not start with a scroll view, a light wash over one that
+does, its own dark band over the system inspector column. So the window has one column: the
+page and the inspector beside it sit in one full-width scroll view that never scrolls
 (`PageScrollHost` in `PanelDetail.swift`), and the bar is the page's colour under one wash
 from the traffic lights to the window's edge. The inspector is a column of the page
 (`InspectorColumn`), not `.inspector`. Laying a colour over the band from SwiftUI does not
-reach it, and `NSWindow.titlebarAppearsTransparent` sends a narrow window whose scroll
-bars take room into an endless constraint pass. The page column paints the
-tone's background (`SurfacePalette`), so the material never shows through content. The
-panel adds no visual-effect view, backdrop or toolbar of its own. macOS decides how the
-materials look: opaque under **Reduce Transparency**, dimmed in an inactive window.
+reach it, and `NSWindow.titlebarAppearsTransparent` is never set because it sends a narrow
+window whose scroll bars take room into an endless constraint pass. In Solid mode, the page
+column paints the tone's opaque background (`SurfacePalette`) and adds no visual-effect view
+or backdrop of its own.
+
+When **Liquid Glass** is chosen, `ControlPanelWindow.applyWindowStyle` clears window opacity
+(`isOpaque = false`, `backgroundColor = .clear`) and `WindowGlassBackdrop` places a
+behind-window `NSVisualEffectView` (`.hudWindow`, `.behindWindow`) behind the window content,
+tinted by the active theme's background colour. Secondary columns, cards, footers and the
+Now Playing bar scale their surface opacity in `PanelTheme` from the **Window transparency**
+slider (0%–100%), keeping a contrast floor so text and controls stay legible at 100%.
+Dragging the slider previews live and saves on release. Under macOS **Reduce Transparency**,
+both the window and every SwiftUI surface fall back automatically to opaque Solid fills.
 
 ## Persistence and reset
 
 Choices are stored in the app's defaults (`AppThemeStore`, the
 `WallpaperMachine.appTheme` default) and stay usable before the renderer's settings
-arrive. Changes apply immediately and
-are remembered for the next launch. An invalid accent (anything but `#rrggbb`) is
+arrive. Changes apply immediately and are remembered for the next launch. An invalid accent
+(anything but `#rrggbb`) or out-of-range transparency (anything outside `0...100`) is
 rejected without overwriting the saved value. **Reset appearance** restores System, the
-default accent, the Neutral tone, the Day icon and Halloween week; it does not touch
-wallpapers, playback or display configuration. Backups carry the Halloween choice with
-the rest of the theme.
+default accent, the Neutral tone, Solid window, the Day icon and automatic seasonal weeks;
+it does not touch wallpapers, playback or display configuration. Backups carry the seasonal
+and Liquid Glass choices with the rest of the theme.
 
 ## App icon
 
@@ -116,7 +128,7 @@ assets on macOS (it uses Quick Look, `sips`, and Xcode's Icon Composer and Swift
 
 ```sh
 python3 scripts/brand.py                           # app icon, Dock choices, tray icon, DMG background
-python3 scripts/brand.py --seasonal                # only the Halloween Dock icon
+python3 scripts/brand.py --seasonal                # only the seasonal Dock icons (Halloween, Christmas)
 python3 scripts/brand.py --website <site-checkout> # plus logo, favicons and manifest there
 ```
 
@@ -133,10 +145,11 @@ python3 scripts/brand.py --website <site-checkout> # plus logo, favicons and man
   newer preview default), keep a 100 px transparent outer margin and load as 512-point
   Retina images. The root README displays `day.png`; update its path there if the export
   is renamed.
-- The Halloween Dock icon (`AppIconHalloween.imageset/halloween.png`) is the Night tile
-  with `Resources/Seasonal/halloween-night.jpg` (a papercut night composed from the same
-  silhouettes) clipped to the screen panel and the
-  jack-o'-lantern (`PUMPKIN` in `brand.py`, the same outline as `AppMark`'s) in the
+- The seasonal Dock icons (`AppIconHalloween.imageset/halloween.png` and
+  `AppIconChristmas.imageset/christmas.png`) are the Night tile with
+  `Resources/Seasonal/halloween-night.jpg` or `christmas-night.jpg` (a papercut night
+  composed from each season's silhouettes) clipped to the screen panel and the seasonal
+  emblem (`PUMPKIN` or `CHRISTMAS` in `brand.py`, the same outlines as `AppMark`'s) in the
   gear's place, clear of the frame's ends as the gear is.
 - The small-size mark is heavier and stays reserved for the menu bar; the panel shows the
   Dock icon images instead.

@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-25 — Wave 2B Settings, Widgets Undo, and Browse/Downloads upgrades (#12-#15)
+
+- Scope: Settings unified thumbnail chooser, Automation enable/reorder/solar readout, merged Scale (>1.0 preserved), async Storage metrics, Search section titles/live units/scoping (#12); Desktop Widgets scoped Undo/Redo, gesture coalescing, safe canvas Delete, .sun Displays link (#13); Workshop Collection/Favorites Download missing, lazy tile context menus, Pixiv multi-page strip & batch save, Downloads batch controls & Pixiv Download next, async disk space, Steam web persona identity, Workshop update dismiss, LibraryFolderRow Storage jump (#14-#15).
+- python3 scripts/test.py: PASS (36/36 Python suites OK; 5296 passed, 0 failed, 70 skipped of 5366 native tests in 137s).
+- Localization: App/Resources/Localizable.xcstrings edited as text (+38 new keys across en, ja, ko, pt-BR, zh-Hans, zh-Hant; -1 superseded unreferenced key); catalog and panel localization suites passed.
+- Code review: verifier-w2b re-verified all fixes and signed off PASS (no blockers).
+- Not run: Release build (not requested), opt-in --ui desktop tests, and live visual inspection.
+
 ## 2026-11-25 — Wave 2A UI/UX workflow upgrades (#8, #9, #10, #11, #16)
 
 - Scope: three-page clickable tags, ActiveFilterChipsBar, Workshop Hide installed (#8); Collections scope menu, quick actions, target display wallpaper titles, inline playlist controls (#9); Inspector search/modified/collapsible headings, artwork Preview, Preview shortcuts/Apply (#10); Menu Bar dynamic scroll/compact picker/Mute All/playlist badge/reveal (#11); Shift+Arrow, Cmd+S, Placement pinch/Option+scroll/double-click/center guides, Preset Update & Apply & Save (#16).

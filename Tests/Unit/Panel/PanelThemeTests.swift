@@ -71,15 +71,78 @@ final class PanelThemeTests: XCTestCase {
   func testASeasonStandsInForThePersonsAccentAndToneWhileItIsOn() {
     let own = preferences(accent: "#30d158", tone: .cool)
     for appearance in [PanelAppearance.light, .dark] {
-      let halloween = PanelTheme(preferences: own, season: .halloween, appearance: appearance)
-      XCTAssertEqual(halloween.season, .halloween)
-      XCTAssertEqual(halloween.surface, SurfacePalette(season: .halloween, appearance: appearance))
-      XCTAssertEqual(halloween.accent, AccentPalette(accent: Season.halloween.accent, appearance: appearance))
-      XCTAssertEqual(halloween.tone, .cool, "The person's tone is still what they chose")
+      for season in Season.allCases {
+        let themed = PanelTheme(preferences: own, season: season, appearance: appearance)
+        XCTAssertEqual(themed.season, season)
+        XCTAssertEqual(themed.surface, SurfacePalette(season: season, appearance: appearance))
+        XCTAssertEqual(themed.accent, AccentPalette(accent: season.accent, appearance: appearance))
+        XCTAssertEqual(themed.tone, .cool, "The person's tone is still what they chose")
+      }
       let everyday = PanelTheme(preferences: own, appearance: appearance)
       XCTAssertEqual(everyday.surface, SurfacePalette(tone: .cool, appearance: appearance))
       XCTAssertEqual(everyday.accent.base.hex, "#30d158")
     }
+  }
+
+  func testLiquidGlassOpacityCurveScalesWithTransparencyAndRespectsReduceTransparency() {
+    var prefs = AppThemePreferences()
+    let solid = PanelTheme(preferences: prefs, appearance: .dark)
+    XCTAssertFalse(solid.isLiquidGlass)
+    XCTAssertEqual(solid.windowBackgroundOpacity(reduceTransparency: false), 1)
+    XCTAssertEqual(solid.panelSurfaceOpacity(reduceTransparency: false), 1)
+    XCTAssertEqual(solid.cardSurfaceOpacity(reduceTransparency: false), 1)
+    XCTAssertEqual(solid.seasonalGroundOpacity(reduceTransparency: false), 1)
+
+    prefs.windowStyle = .liquidGlass
+    prefs.glassTransparency = 0
+    let frosted = PanelTheme(preferences: prefs, appearance: .dark)
+    prefs.glassTransparency = 50
+    let balanced = PanelTheme(preferences: prefs, appearance: .dark)
+    prefs.glassTransparency = 100
+    let clear = PanelTheme(preferences: prefs, appearance: .dark)
+
+    XCTAssertTrue(balanced.isLiquidGlass)
+    XCTAssertGreaterThan(
+      frosted.windowBackgroundOpacity(reduceTransparency: false),
+      balanced.windowBackgroundOpacity(reduceTransparency: false))
+    XCTAssertGreaterThan(
+      balanced.windowBackgroundOpacity(reduceTransparency: false),
+      clear.windowBackgroundOpacity(reduceTransparency: false))
+    XCTAssertGreaterThan(
+      clear.windowBackgroundOpacity(reduceTransparency: false), 0.1,
+      "Background tint keeps a contrast floor at 100%")
+    XCTAssertGreaterThan(
+      clear.cardSurfaceOpacity(reduceTransparency: false),
+      clear.windowBackgroundOpacity(reduceTransparency: false),
+      "Cards stay more grounded than the canvas for readability")
+
+    for theme in [frosted, balanced, clear] {
+      XCTAssertEqual(theme.windowBackgroundOpacity(reduceTransparency: true), 1)
+      XCTAssertEqual(theme.panelSurfaceOpacity(reduceTransparency: true), 1)
+      XCTAssertEqual(theme.cardSurfaceOpacity(reduceTransparency: true), 1)
+      XCTAssertEqual(theme.seasonalGroundOpacity(reduceTransparency: true), 1)
+    }
+  }
+
+  func testControlPanelWindowStyleAppliesTranslucencyAndRespectsReduceTransparency() {
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 200, height: 200), styleMask: [.titled],
+      backing: .buffered, defer: true)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+
+    ControlPanelWindow.applyWindowStyle(.liquidGlass, to: window, reduceTransparency: false)
+    XCTAssertFalse(window.isOpaque)
+    XCTAssertEqual(window.backgroundColor, .clear)
+    XCTAssertFalse(window.titlebarAppearsTransparent, "Must never enable titlebarAppearsTransparent")
+
+    ControlPanelWindow.applyWindowStyle(.liquidGlass, to: window, reduceTransparency: true)
+    XCTAssertTrue(window.isOpaque)
+    XCTAssertEqual(window.backgroundColor, .windowBackgroundColor)
+
+    ControlPanelWindow.applyWindowStyle(.solid, to: window, reduceTransparency: false)
+    XCTAssertTrue(window.isOpaque)
+    XCTAssertEqual(window.backgroundColor, .windowBackgroundColor)
   }
 
   func testRootModifierPutsTheSeasonOnAndTakesItOff() throws {

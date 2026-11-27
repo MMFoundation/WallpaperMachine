@@ -96,8 +96,10 @@ final class LibraryTileRulesTests: PanelTestCase {
         let theme = PanelTheme(preferences: preferences, appearance: appearance)
         XCTAssertEqual(looks(theme), reference, "\(tone) \(appearance)")
       }
-      let halloween = PanelTheme(season: .halloween, appearance: appearance)
-      XCTAssertEqual(looks(halloween), reference, "Halloween \(appearance)")
+      for season in Season.allCases {
+        let seasonal = PanelTheme(season: season, appearance: appearance)
+        XCTAssertEqual(looks(seasonal), reference, "\(season.rawValue) \(appearance)")
+      }
     }
   }
 

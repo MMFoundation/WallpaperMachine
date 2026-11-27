@@ -5,7 +5,8 @@ import SwiftUI
 /// for, so it stays sharp at any size and takes the colour of what is around it.
 ///
 /// In the Halloween season a carved pumpkin takes the gear's place, in the tint, its stem in the
-/// frame's colour; the Dock icon draws the same pumpkin (`scripts/brand.py`).
+/// frame's colour; in the Christmas season an evergreen tree takes its place, crowned with a star
+/// in the frame's colour. The Dock icons draw the same emblems (`scripts/brand.py`).
 struct AppMark: View {
   var size: CGFloat = 20
   var season: Season?
@@ -19,12 +20,60 @@ struct AppMark: View {
       case .halloween:
         AppMarkPumpkinStem()
         AppMarkPumpkin().fill(.tint, style: FillStyle(eoFill: true))
+      case .christmas:
+        AppMarkChristmasStar()
+        AppMarkChristmasTree().fill(.tint, style: FillStyle(eoFill: true))
       case nil:
         AppMarkGear().fill(style: FillStyle(eoFill: true))
       }
     }
     .frame(width: size, height: size)
     .accessibilityHidden(true)
+  }
+}
+
+/// The Christmas evergreen tree in the gear's place: three layered boughs and a short trunk, with
+/// ornament cutouts filled even-odd. In the mark's 24 units, like `brand.py`'s `CHRISTMAS`.
+private struct AppMarkChristmasTree: Shape {
+  func path(in rect: CGRect) -> Path {
+    let scale = min(rect.width, rect.height) / 24
+    func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+      CGPoint(x: rect.minX + x * scale, y: rect.minY + y * scale)
+    }
+    var p = Path()
+    p.addLines([
+      pt(5.9, 15.25), pt(7.80, 17.45), pt(7.10, 17.25), pt(8.80, 19.50), pt(7.95, 19.30),
+      pt(9.65, 21.50), pt(6.65, 21.50), pt(6.65, 22.75), pt(5.15, 22.75), pt(5.15, 21.50),
+      pt(2.15, 21.50), pt(3.85, 19.30), pt(3.00, 19.50), pt(4.70, 17.25), pt(4.00, 17.45),
+    ])
+    p.closeSubpath()
+    for (cx, cy, r) in [(5.15, 18.05, 0.56), (6.85, 19.50, 0.60), (4.60, 20.30, 0.54)] {
+      let c = pt(cx, cy)
+      let radius = r * scale
+      p.addEllipse(
+        in: CGRect(x: c.x - radius, y: c.y - radius, width: radius * 2, height: radius * 2))
+    }
+    return p
+  }
+}
+
+/// The five-point star above the Christmas tree's apex.
+private struct AppMarkChristmasStar: Shape {
+  func path(in rect: CGRect) -> Path {
+    let scale = min(rect.width, rect.height) / 24
+    let cx: CGFloat = 5.9
+    let cy: CGFloat = 14.55
+    var p = Path()
+    for index in 0..<10 {
+      let angle = -CGFloat.pi / 2 + CGFloat(index) * CGFloat.pi / 5
+      let radius: CGFloat = index.isMultiple(of: 2) ? 1.05 : 0.44
+      let point = CGPoint(
+        x: rect.minX + (cx + radius * cos(angle)) * scale,
+        y: rect.minY + (cy + radius * sin(angle)) * scale)
+      if index == 0 { p.move(to: point) } else { p.addLine(to: point) }
+    }
+    p.closeSubpath()
+    return p
   }
 }
 

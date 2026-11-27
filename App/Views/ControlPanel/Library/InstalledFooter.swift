@@ -8,6 +8,7 @@ import SwiftUI
 struct InstalledFooter: View {
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   @State private var width: CGFloat = 1000
 
   /// Below this width the tools show their icons only.
@@ -34,7 +35,7 @@ struct InstalledFooter: View {
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .background(theme.surface.surface.color)
+      .background(theme.surfaceFill(reduceTransparency: reduceTransparency))
       .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { width = $0 }
       .accessibilityIdentifier("installed-summary")
     }

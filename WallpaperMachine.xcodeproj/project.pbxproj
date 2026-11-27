@@ -1085,6 +1085,7 @@
 		DC5A18EF6383B2B7FF7A5DBC /* SettingsMiniWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 471267FE1E893288498CF1C2 /* SettingsMiniWindow.swift */; };
 		DCD42DF74BDD613D76589B8F /* WorkshopListStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F576B1FA5FA623392F22C76E /* WorkshopListStateTests.swift */; };
 		DD4467E011CDB4D331080205 /* AppUpdateModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 631CDAA9941C531C5D8A0074 /* AppUpdateModels.swift */; };
+		DD4DE0A2542C8FC5B0889E69 /* WindowGlassBackdrop.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0372A66BB95B4114F5F431C /* WindowGlassBackdrop.swift */; };
 		DD71655311DF35F07E300F8C /* FirstRunDraftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE3C0D175EA9979383652025 /* FirstRunDraftTests.swift */; };
 		DD73D2E30349E2B99AFD96C7 /* WebWallpaperInspectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C0FE8499AFAC0BC233F9E5 /* WebWallpaperInspectionTests.swift */; };
 		DDB4C35D365557783AAD6844 /* PanelDisplayPositionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39C9F2B665AA70CE76101EBC /* PanelDisplayPositionTests.swift */; };
@@ -2424,6 +2425,7 @@
 		DF8B3805BB7C98C98A73D2B9 /* DownloadDialogHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadDialogHost.swift; sourceTree = "<group>"; };
 		DFB39220D40F063E09E07B98 /* PanelDisplayActionsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelDisplayActionsTests.swift; sourceTree = "<group>"; };
 		DFB4754D5C33FBE9660627F1 /* SteamKeyValues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SteamKeyValues.swift; sourceTree = "<group>"; };
+		E0372A66BB95B4114F5F431C /* WindowGlassBackdrop.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowGlassBackdrop.swift; sourceTree = "<group>"; };
 		E047613ABA7DF4649DC5531C /* TranslationSessionHostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslationSessionHostTests.swift; sourceTree = "<group>"; };
 		E08A8AC3D667170E5F8B6030 /* SettingsDisclosureHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsDisclosureHeader.swift; sourceTree = "<group>"; };
 		E0EEA4091D472E1E05C1EF92 /* PanelController+Pixiv.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PanelController+Pixiv.swift"; sourceTree = "<group>"; };
@@ -2923,6 +2925,7 @@
 				46F40440815578279FF7B378 /* TileMarkChip.swift */,
 				9EF27BAC78888873A2A2EAA8 /* WallpaperActionItems.swift */,
 				5F9B4F5237758E38F343EE69 /* WallpaperTile.swift */,
+				E0372A66BB95B4114F5F431C /* WindowGlassBackdrop.swift */,
 			);
 			path = Components;
 			sourceTree = "<group>";
@@ -5977,6 +5980,7 @@
 				70877A0C881DFF94EBB262B5 /* WelcomeTipsAndStartPages.swift in Sources */,
 				FB12AF33A44F664715C64090 /* WidgetsSettingsSection.swift in Sources */,
 				77DEE731E901DCF18994ED58 /* WidgetsWorkspace.swift in Sources */,
+				DD4DE0A2542C8FC5B0889E69 /* WindowGlassBackdrop.swift in Sources */,
 				3D354BA54DB9E8B579C210BE /* WorkshopBrowseState.swift in Sources */,
 				92131B2EE9BE54F842E17D6B /* WorkshopBrowserModel.swift in Sources */,
 				B630253B2C87ABF4E9933430 /* WorkshopBrowserPage.swift in Sources */,

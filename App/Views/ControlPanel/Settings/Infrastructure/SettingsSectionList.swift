@@ -13,6 +13,7 @@ struct SettingsSectionList: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     let settings = controller.settings
@@ -29,7 +30,9 @@ struct SettingsSectionList: View {
       list(settings, search)
     }
     .frame(width: Self.width)
-    .background(theme.surface.background.color)
+    .background(
+      theme.isLiquidGlass && !reduceTransparency ? Color.clear : theme.surface.background.color
+    )
   }
 
   private func list(_ settings: SettingsModel, _ search: SettingsSearch) -> some View {

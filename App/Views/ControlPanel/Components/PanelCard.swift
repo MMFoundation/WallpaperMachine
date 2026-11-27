@@ -70,12 +70,17 @@ struct PanelCardSurface: ViewModifier {
   var fill: Color?
 
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   func body(content: Content) -> some View {
     let shape = RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous)
+    let isGlass = theme.isLiquidGlass && !reduceTransparency
     content
-      .background(fill ?? theme.surface.card.color, in: shape)
-      .overlay { shape.strokeBorder(theme.surface.divider.color, lineWidth: 0.5) }
+      .background(fill ?? theme.cardFill(reduceTransparency: reduceTransparency), in: shape)
+      .overlay {
+        shape.strokeBorder(
+          isGlass ? theme.surface.line.color : theme.surface.divider.color, lineWidth: 0.5)
+      }
   }
 }
 

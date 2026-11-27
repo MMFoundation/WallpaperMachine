@@ -18,17 +18,22 @@ final class AppIconImageTests: XCTestCase {
     XCTAssertEqual(Set(artwork).count, artwork.count, "Each icon is its own artwork")
   }
 
-  func testTheHalloweenDockIconLoadsAtFullSizeAndIsItsOwnArtwork() throws {
-    let halloween = try AppThemePreferences.dockImage(named: Season.halloween.dockImageName)
-    XCTAssertEqual(halloween.size, NSSize(width: 512, height: 512))
-    let pixels = halloween.representations.map { max($0.pixelsWide, $0.pixelsHigh) }.max() ?? 0
-    XCTAssertGreaterThanOrEqual(pixels, 1024)
-    let artwork = try XCTUnwrap(halloween.tiffRepresentation)
-    for icon in AppThemePreferences.Icon.allCases {
-      XCTAssertNotEqual(try icon.image().tiffRepresentation, artwork, icon.rawValue)
+  func testEverySeasonalDockIconLoadsAtFullSizeAndIsItsOwnArtwork() throws {
+    var seasonalArtwork: [Data] = []
+    for season in Season.allCases {
+      let image = try AppThemePreferences.dockImage(named: season.dockImageName)
+      XCTAssertEqual(image.size, NSSize(width: 512, height: 512), season.rawValue)
+      let pixels = image.representations.map { max($0.pixelsWide, $0.pixelsHigh) }.max() ?? 0
+      XCTAssertGreaterThanOrEqual(pixels, 1024, season.rawValue)
+      let artwork = try XCTUnwrap(image.tiffRepresentation, season.rawValue)
+      for icon in AppThemePreferences.Icon.allCases {
+        XCTAssertNotEqual(try icon.image().tiffRepresentation, artwork, "\(season.rawValue) vs \(icon.rawValue)")
+      }
+      XCTAssertThrowsError(
+        try AppThemePreferences.dockImage(named: season.dockImageName, in: Bundle(for: Self.self)))
+      seasonalArtwork.append(artwork)
     }
-    XCTAssertThrowsError(
-      try AppThemePreferences.dockImage(named: Season.halloween.dockImageName, in: Bundle(for: Self.self)))
+    XCTAssertEqual(Set(seasonalArtwork).count, Season.allCases.count, "Each season has its own Dock artwork")
   }
 
   func testLoadingTwiceHandsOutIndependentImages() throws {

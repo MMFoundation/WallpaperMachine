@@ -16,11 +16,31 @@ struct SeasonHorizon: View {
 
   /// The band's height over the Now Playing bar.
   static let groundHeight: CGFloat = 60
-  /// The paper every silhouette is cut from; the Now Playing bar is this colour while the season is on.
-  static let ink = PanelColor(rgb: 0x120e19)
-  /// The moon at night; over a light window it rises as a harvest moon at dusk.
-  static let moon = PanelColor(rgb: 0xf6ead0)
-  static let harvestMoon = PanelColor(rgb: 0xf09a4c)
+
+  /// The paper every silhouette of `season` is cut from; the Now Playing bar takes this colour
+  /// while the season is on.
+  static func ink(for season: Season) -> PanelColor {
+    switch season {
+    case .halloween: PanelColor(rgb: 0x120e19)
+    case .christmas: PanelColor(rgb: 0x0c1512)
+    }
+  }
+
+  /// The moon at night in `season`.
+  static func moon(for season: Season) -> PanelColor {
+    switch season {
+    case .halloween: PanelColor(rgb: 0xf6ead0)
+    case .christmas: PanelColor(rgb: 0xeef6fa)
+    }
+  }
+
+  /// The moon over a light window: harvest orange for Halloween, warm winter gold for Christmas.
+  static func dayMoon(for season: Season) -> PanelColor {
+    switch season {
+    case .halloween: PanelColor(rgb: 0xf09a4c)
+    case .christmas: PanelColor(rgb: 0xf2be5c)
+    }
+  }
 
   /// One silhouette on the horizon: where it stands as a share of the width, its height as a share
   /// of the band's, and the narrowest band that has room for it.
@@ -44,6 +64,16 @@ struct SeasonHorizon: View {
         Piece(name: "HalloweenHouse", position: 0.8, height: 0.84),
         Piece(name: "HalloweenPumpkins", position: 0.905, height: 0.28),
       ]
+    case .christmas:
+      [
+        Piece(name: "ChristmasTreeTall", position: 0.07, height: 0.96),
+        Piece(name: "ChristmasGifts", position: 0.21, height: 0.36),
+        Piece(name: "ChristmasSnowman", position: 0.33, height: 0.46, minimumWidth: 1100),
+        Piece(name: "ChristmasPine", position: 0.46, height: 0.78, minimumWidth: 760),
+        Piece(name: "ChristmasReindeer", position: 0.595, height: 0.50, minimumWidth: 980),
+        Piece(name: "ChristmasCabin", position: 0.8, height: 0.84),
+        Piece(name: "ChristmasLamp", position: 0.915, height: 0.52),
+      ]
     }
   }
 
@@ -51,6 +81,7 @@ struct SeasonHorizon: View {
   static func flock(_ season: Season) -> String {
     switch season {
     case .halloween: "HalloweenBats"
+    case .christmas: "ChristmasSleigh"
     }
   }
 
@@ -58,31 +89,43 @@ struct SeasonHorizon: View {
   var style: Style = .ground
 
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     let dark = theme.appearance == .dark
     // Moonlight behind the hills in the dark, a dusk glow over a light window: the silhouettes need
     // something lighter than their ink to stand against.
-    let glow = dark ? PanelColor(rgb: 0x4a3a70) : PanelColor(rgb: 0xf0c690)
+    let glow: PanelColor =
+      switch (season, dark) {
+      case (.halloween, true): PanelColor(rgb: 0x4a3a70)
+      case (.halloween, false): PanelColor(rgb: 0xf0c690)
+      case (.christmas, true): PanelColor(rgb: 0x265952)
+      case (.christmas, false): PanelColor(rgb: 0xdfd4b8)
+      }
     let night = style == .night
-    let moon = night || dark ? Self.moon : Self.harvestMoon
+    let moon = night || dark ? Self.moon(for: season) : Self.dayMoon(for: season)
     let season = season
     Canvas { context, size in
       Self.draw(
-        in: &context, size: size, season: season, night: night, glow: glow.color, moon: moon.color)
+        in: &context, size: size, season: season, night: night, dark: dark, glow: glow.color,
+        moon: moon.color)
     }
-    .background(night ? Color.clear : theme.surface.background.color)
+    .background(
+      night || (theme.isLiquidGlass && !reduceTransparency)
+        ? Color.clear : theme.surface.background.color
+    )
     .accessibilityHidden(true)
     .allowsHitTesting(false)
   }
 
   private static func draw(
-    in context: inout GraphicsContext, size: CGSize, season: Season, night: Bool, glow: Color,
-    moon: Color
+    in context: inout GraphicsContext, size: CGSize, season: Season, night: Bool, dark: Bool,
+    glow: Color, moon: Color
   ) {
     let width = size.width
     let height = size.height
     guard width > 0, height > 0 else { return }
+    let inkColor = Self.ink(for: season).color
     // The hills keep their shape whatever the band's height: their waves are measured in units of a
     // ground band's height, not in points.
     let unit = height / groundHeight
@@ -96,10 +139,15 @@ struct SeasonHorizon: View {
     // The sky: a night gradient, or the window's background warmed toward the horizon.
     let sky = Path(CGRect(origin: .zero, size: size))
     if night {
+      let nightStops: [Color] =
+        switch season {
+        case .halloween: [PanelColor(rgb: 0x1a1430).color, PanelColor(rgb: 0x4a3a70).color]
+        case .christmas: [PanelColor(rgb: 0x081716).color, PanelColor(rgb: 0x225249).color]
+        }
       context.fill(
         sky,
         with: .linearGradient(
-          Gradient(colors: [Color(.sRGB, red: 0.102, green: 0.078, blue: 0.188), Color(.sRGB, red: 0.29, green: 0.227, blue: 0.439)]),
+          Gradient(colors: nightStops),
           startPoint: .zero, endPoint: CGPoint(x: 0, y: height)))
     } else {
       context.fill(
@@ -110,6 +158,24 @@ struct SeasonHorizon: View {
             .init(color: glow, location: 0.85),
           ]),
           startPoint: .zero, endPoint: CGPoint(x: 0, y: height)))
+    }
+
+    // Still winter stars across the Christmas night sky (fixed geometry, no animation).
+    if season == .christmas && (night || dark) {
+      let stars: [(CGFloat, CGFloat, CGFloat, Double)] = [
+        (0.05, 0.14, 1.3, 0.7), (0.14, 0.24, 1.0, 0.55), (0.24, 0.12, 1.4, 0.75),
+        (0.35, 0.22, 1.1, 0.55), (0.44, 0.10, 1.2, 0.65), (0.56, 0.18, 1.3, 0.7),
+        (0.63, 0.10, 1.0, 0.5), (0.76, 0.16, 1.2, 0.6), (0.92, 0.14, 1.4, 0.7),
+        (0.96, 0.26, 1.0, 0.5),
+      ]
+      for (fx, fy, radius, opacity) in stars {
+        let r = radius * (night ? 1.15 : 0.9)
+        let cx = width * fx
+        let cy = height * fy
+        context.fill(
+          Path(ellipseIn: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)),
+          with: .color(moon.opacity(opacity)))
+      }
     }
 
     // The moon, rising behind the hills, with its halo.
@@ -125,13 +191,14 @@ struct SeasonHorizon: View {
       Path(ellipseIn: CGRect(x: moonX - radius, y: moonY - radius, width: radius * 2, height: radius * 2)),
       with: .color(moon))
 
-    // Bats crossing toward the moon.
-    let bats = context.resolve(Image(flock(season)))
-    let batHeight = height * (night ? 0.26 : 0.34)
-    let batWidth = batHeight * bats.size.width / max(bats.size.height, 1)
+    // What crosses the sky toward the moon: bats for Halloween, Santa's sleigh for Christmas.
+    let flyer = context.resolve(Image(flock(season)))
+    let flyerHeight = height * (night ? 0.26 : 0.34)
+    let flyerWidth = flyerHeight * flyer.size.width / max(flyer.size.height, 1)
     context.draw(
-      bats,
-      in: CGRect(x: width * 0.69 - batWidth / 2, y: height * 0.04, width: batWidth, height: batHeight))
+      flyer,
+      in: CGRect(
+        x: width * 0.69 - flyerWidth / 2, y: height * 0.04, width: flyerWidth, height: flyerHeight))
 
     // The hills, down to the bottom edge, where the Now Playing bar carries the same ink on.
     var hills = Path()
@@ -144,7 +211,7 @@ struct SeasonHorizon: View {
     }
     hills.addLine(to: CGPoint(x: width, y: height))
     hills.closeSubpath()
-    context.fill(hills, with: .color(ink.color))
+    context.fill(hills, with: .color(inkColor))
 
     // The silhouettes stand on the ridge, their feet a little sunk into it.
     let groundWidth = width / unit

@@ -38,6 +38,10 @@ struct SettingsMiniWindow: View {
 
   private func layer(_ look: SurfacePalette.Miniature, accent: Color) -> some View {
     ZStack(alignment: .topLeading) {
+      if look.isGlass, let top = look.glassBackdropTop, let bottom = look.glassBackdropBottom {
+        LinearGradient(
+          colors: [top.color, bottom.color], startPoint: .topLeading, endPoint: .bottomTrailing)
+      }
       look.background.color
       look.bar.color.frame(width: 22)
       line(look.line, width: 38).offset(x: 30, y: 12)
@@ -47,9 +51,14 @@ struct SettingsMiniWindow: View {
       if let moon = look.moon {
         Circle().fill(moon.color).frame(width: 9, height: 9).offset(x: 72, y: 6)
         MiniHills()
-          .fill(SeasonHorizon.ink.color)
+          .fill((look.horizonInk ?? SeasonHorizon.ink(for: .halloween)).color)
           .frame(width: Self.size.width, height: 10)
           .offset(y: Self.size.height - 10)
+      }
+      if look.isGlass, let sheen = look.glassSheen {
+        LinearGradient(
+          colors: [sheen.color, sheen.color.opacity(0)], startPoint: .topLeading,
+          endPoint: .center)
       }
     }
     .frame(width: Self.size.width, height: Self.size.height, alignment: .topLeading)

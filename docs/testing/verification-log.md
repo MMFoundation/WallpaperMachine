@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-27 — Christmas seasonal look and Liquid Glass window appearance (#267)
+
+- Command: python3 scripts/brand.py --seasonal
+- Result: regenerated AppIconHalloween.imageset/halloween.png and AppIconChristmas.imageset/christmas.png
+- Command: python3 scripts/test.py
+- Result: all 37 Python test modules (748 tests, including brand, design tokens, localization catalogs, doc links) passed; XcodeGen regenerated project; native suite 5434 passed, 0 failed, 70 skipped of 5504 in 167s
+- Coverage added: AppThemeTests (Christmas dates, mutual exclusivity, Liquid Glass preview/commit/validation), AppIconImageTests, SurfacePaletteTests (Christmas WCAG contrast & miniatures), PanelThemeTests (Liquid Glass opacity curve & window style), AppearanceSettingsTests, LibraryTileRulesTests, ShellRenderTests, SettingsSectionsLocalizationTests, WallpaperBackupTests, test_brand.py
+- Not run: Release build (not requested) and live desktop visual check of Liquid Glass translucency, Reduce Transparency toggle, and Christmas Dock icon/horizon on screen
+
 ## 2026-11-27 — Fill with blurred backdrop (#268)
 
 - Added WallpaperScalingMode::FILL_BLURRED (5, fill_blurred, FillBlurred) across C++ Metal renderer, Rust core/bridge, Swift bindings, native video/lock-screen/preview layout, inspector, Settings > Displays, localization and docs.
@@ -101,11 +110,3 @@ entry's recorded result is not allowed.
 - python3 scripts/test.py -> PASS (36/36 Python suites OK; 5343 passed, 0 failed, 70 skipped of 5413 native tests in 175s).
 - Localization & review: App/Resources/Localizable.xcstrings edited as text (+131 net keys across en/ja/ko/pt-BR/zh-Hans/zh-Hant); verifier-w3a PASS after resolving 3 blockers (sticker test/undo isolation, sleep timer pause cancel, Presentation Mode async re-entrancy).
 - Not run: Release .app build (not requested), desktop UI tests (--ui), live Steam/media opt-ins, and live macOS visual/energy inspection of parallax reuse, Now Playing widget, and display hotplug.
-
-## 2026-11-25 — Wave 2B Settings, Widgets Undo, and Browse/Downloads upgrades (#12-#15)
-
-- Scope: Settings unified thumbnail chooser, Automation enable/reorder/solar readout, merged Scale (>1.0 preserved), async Storage metrics, Search section titles/live units/scoping (#12); Desktop Widgets scoped Undo/Redo, gesture coalescing, safe canvas Delete, .sun Displays link (#13); Workshop Collection/Favorites Download missing, lazy tile context menus, Pixiv multi-page strip & batch save, Downloads batch controls & Pixiv Download next, async disk space, Steam web persona identity, Workshop update dismiss, LibraryFolderRow Storage jump (#14-#15).
-- python3 scripts/test.py: PASS (36/36 Python suites OK; 5296 passed, 0 failed, 70 skipped of 5366 native tests in 137s).
-- Localization: App/Resources/Localizable.xcstrings edited as text (+38 new keys across en, ja, ko, pt-BR, zh-Hans, zh-Hant; -1 superseded unreferenced key); catalog and panel localization suites passed.
-- Code review: verifier-w2b re-verified all fixes and signed off PASS (no blockers).
-- Not run: Release build (not requested), opt-in --ui desktop tests, and live visual inspection.

@@ -6,10 +6,12 @@ final class SurfacePaletteTests: XCTestCase {
   private let tones: [AppThemePreferences.Tone] = [.neutral, .warm, .cool]
   private let appearances: [PanelAppearance] = [.light, .dark]
 
-  /// Every palette the panel can wear in `appearance`: each tone's and the Halloween look's.
+  /// Every palette the panel can wear in `appearance`: each tone's and each season's.
   private func palettes(_ appearance: PanelAppearance) -> [(String, SurfacePalette)] {
     tones.map { ("\($0) \(appearance)", SurfacePalette(tone: $0, appearance: appearance)) }
-      + [("halloween \(appearance)", SurfacePalette(season: .halloween, appearance: appearance))]
+      + Season.allCases.map {
+        ("\($0.rawValue) \(appearance)", SurfacePalette(season: $0, appearance: appearance))
+      }
   }
 
   /// The menu bar popover keeps the system's translucent material, which a dark window behind a
@@ -86,6 +88,38 @@ final class SurfacePaletteTests: XCTestCase {
     XCTAssertGreaterThan(blue(night.surface), red(night.surface))
     let parchment = SurfacePalette(season: .halloween, appearance: .light)
     XCTAssertGreaterThan(red(parchment.surface), blue(parchment.surface))
+  }
+
+  func testTheChristmasLookHasItsOwnSurfacesInBothAppearances() {
+    for appearance in appearances {
+      let christmas = SurfacePalette(season: .christmas, appearance: appearance)
+      let halloween = SurfacePalette(season: .halloween, appearance: appearance)
+      XCTAssertNotEqual(christmas.background, halloween.background, "\(appearance)")
+      XCTAssertNotEqual(christmas.text, halloween.text, "\(appearance)")
+      for tone in tones {
+        let everyday = SurfacePalette(tone: tone, appearance: appearance)
+        XCTAssertNotEqual(christmas.background, everyday.background, "\(tone) \(appearance)")
+        XCTAssertNotEqual(christmas.text, everyday.text, "\(tone) \(appearance)")
+      }
+      // Evergreen tint in dark and pine-mist tint in light: green leads both red and blue.
+      XCTAssertGreaterThan(green(christmas.surface), red(christmas.surface), "\(appearance)")
+      XCTAssertGreaterThan(green(christmas.surface), blue(christmas.surface), "\(appearance)")
+    }
+  }
+
+  func testLiquidGlassMiniatureIsTranslucentAndDistinctFromSolid() {
+    for appearance in appearances {
+      let solid = SurfacePalette.miniature(
+        windowStyle: .solid, tone: .neutral, season: nil, appearance: appearance)
+      let glass = SurfacePalette.miniature(
+        windowStyle: .liquidGlass, tone: .neutral, season: nil, appearance: appearance)
+      XCTAssertFalse(solid.isGlass)
+      XCTAssertTrue(glass.isGlass)
+      XCTAssertLessThan(glass.background.alpha, 1)
+      XCTAssertNotNil(glass.glassBackdropTop)
+      XCTAssertNotNil(glass.glassBackdropBottom)
+      XCTAssertNotNil(glass.glassSheen)
+    }
   }
 
   func testOverlaysAreWhiteOnDarkSurfacesAndBlackOnLightOnes() {
@@ -181,5 +215,6 @@ final class SurfacePaletteTests: XCTestCase {
   }
 
   private func red(_ color: PanelColor) -> Int { Int((color.rgb >> 16) & 255) }
+  private func green(_ color: PanelColor) -> Int { Int((color.rgb >> 8) & 255) }
   private func blue(_ color: PanelColor) -> Int { Int(color.rgb & 255) }
 }

@@ -1187,6 +1187,32 @@ final class WallpaperBackupTests: XCTestCase {
         }
     }
 
+    func testThemeBackupValidatesChristmasAndLiquidGlassPreferences() throws {
+        let key = AppThemeStore.defaultsKey
+        let valid: [String: String] = [
+            "mode": "dark", "accent": "#d9363e", "tone": "cool", "icon": "night",
+            "halloween": "off", "christmas": "always", "windowStyle": "liquidGlass",
+            "glassTransparency": "65",
+        ]
+        XCTAssertNoThrow(try WallpaperBackupPreferences.validate(valid, forKey: key))
+        XCTAssertNoThrow(try WallpaperBackupPreferences.validate(["glassTransparency": "0"], forKey: key))
+        XCTAssertNoThrow(try WallpaperBackupPreferences.validate(["glassTransparency": "100"], forKey: key))
+
+        let invalidRecords: [[String: String]] = [
+            ["christmas": "festive"],
+            ["windowStyle": "acrylic"],
+            ["glassTransparency": "-1"],
+            ["glassTransparency": "101"],
+            ["glassTransparency": "050"],
+            ["glassTransparency": "50.5"],
+            ["glassTransparency": "fifty"],
+            ["unknownKey": "value"],
+        ]
+        for bad in invalidRecords {
+            XCTAssertThrowsError(try WallpaperBackupPreferences.validate(bad, forKey: key), "\(bad)")
+        }
+    }
+
     /// Muting every wallpaper is local to this Mac: a backup never carries it, and a package that
     /// claims to cannot silence a Mac whose owner did not ask.
     func testMutingEveryWallpaperIsNeitherBackedUpNorRestored() async throws {

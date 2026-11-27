@@ -3,7 +3,8 @@ import Foundation
 /// The surface, text and divider colours of one surface tone in one appearance: the tone ×
 /// appearance table of `WebUI/panel.css`. Neutral is the untinted look; Warm and Cool shift
 /// every surface and text colour a little toward amber or blue. A season has a column of its own
-/// beside the tones (Halloween: moonlit ink in the dark, candlelit parchment in the light).
+/// beside the tones (Halloween: moonlit ink in the dark, candlelit parchment in the light;
+/// Christmas: evergreen winter night in the dark, snow-lit pine mist in the light).
 /// Contrast-fitted accent colours live in `AccentPalette`. What lies over a picture (marks,
 /// rings, scrims, a tile's controls) is the last group: dark and white, the same in every tone,
 /// season and appearance, since the picture under it can be any colour.
@@ -92,10 +93,11 @@ struct SurfacePalette: Equatable, Sendable {
       case .tone(.warm): 1
       case .tone(.cool): 2
       case .season(.halloween): 3
+      case .season(.christmas): 4
       }
-    let column = (dark ? 0 : 4) + lookColumn
-    /// One row of the table: dark neutral, warm, cool, Halloween, then light neutral, warm, cool,
-    /// Halloween.
+    let column = (dark ? 0 : 5) + lookColumn
+    /// One row of the table: dark neutral, warm, cool, Halloween, Christmas, then light neutral,
+    /// warm, cool, Halloween, Christmas.
     func toned(_ row: String) -> PanelColor {
       PanelColor(hex: row.split(separator: " ").map(String.init)[column])!
     }
@@ -107,20 +109,20 @@ struct SurfacePalette: Equatable, Sendable {
         ? PanelColor(rgb: 0xffffff, alpha: darkAlpha) : PanelColor(rgb: 0, alpha: lightAlpha)
     }
 
-    background = toned("#1d1d1f #1f1d1b #1b1d22 #17121f #ffffff #fffdf9 #fbfcfe #fbf7ef")
-    surface = toned("#222224 #252220 #20232a #1c1626 #f7f7f8 #f8f5ef #f3f5f9 #f5efe3")
-    card = toned("#2a2a2c #2d2a27 #282c34 #231c2e #ffffff #fffdf9 #ffffff #fffcf6")
-    raised = toned("#3a3a3c #3d3935 #383c46 #322940 #ffffff #fffdf9 #ffffff #fffcf6")
-    raisedHover = toned("#464648 #4a4540 #444955 #3d324d #f4f4f6 #f4efe6 #eef1f6 #f1e9da")
-    sunken = toned("#19191b #1b1917 #171920 #120e19 #ffffff #ffffff #ffffff #ffffff")
-    well = toned("#2a2a2c #2d2a27 #282c34 #231c2e #f2f2f4 #f3eee5 #eef1f6 #f1eadc")
-    mediaWell = toned("#151517 #171513 #13151a #0f0b15 #e9e9ed #ebe5da #e4e8ef #e8dfcd")
-    text = toned("#f2f2f4 #f5f1ea #eff2f7 #f3ecdf #1d1d1f #221e18 #171b23 #1c1526")
-    muted = toned("#a1a1a7 #b0a89c #a2a9b8 #b0a3bf #6e6e73 #6d665a #626a79 #6a5f73")
-    faint = toned("#6c6c72 #786f64 #6a7180 #786b88 #a1a1a6 #a69e90 #9aa2b0 #a497a8")
-    tagInk = toned("#d1d1d6 #d8d0c4 #ccd3de #d6cce0 #4a4a4f #4f483f #454d5c #4a3f55")
-    badge = toned("#48484c #4f4840 #454c5a #4a3d5c #e3e3e8 #e8e1d5 #dfe4ec #e9dfcf")
-    sidebarFallback = toned("#2b2b2e #2f2b27 #282c34 #2a2236 #ebebee #eee9df #e9edf3 #eee6d6")
+    background = toned("#1d1d1f #1f1d1b #1b1d22 #17121f #101b17 #ffffff #fffdf9 #fbfcfe #fbf7ef #f8fbf8")
+    surface = toned("#222224 #252220 #20232a #1c1626 #15231e #f7f7f8 #f8f5ef #f3f5f9 #f5efe3 #eef4ef")
+    card = toned("#2a2a2c #2d2a27 #282c34 #231c2e #1b2d27 #ffffff #fffdf9 #ffffff #fffcf6 #fcfefc")
+    raised = toned("#3a3a3c #3d3935 #383c46 #322940 #253c34 #ffffff #fffdf9 #ffffff #fffcf6 #fcfefc")
+    raisedHover = toned("#464648 #4a4540 #444955 #3d324d #2f4a41 #f4f4f6 #f4efe6 #eef1f6 #f1e9da #e5eee7")
+    sunken = toned("#19191b #1b1917 #171920 #120e19 #0c1512 #ffffff #ffffff #ffffff #ffffff #ffffff")
+    well = toned("#2a2a2c #2d2a27 #282c34 #231c2e #1b2d27 #f2f2f4 #f3eee5 #eef1f6 #f1eadc #e8f0ea")
+    mediaWell = toned("#151517 #171513 #13151a #0f0b15 #09110e #e9e9ed #ebe5da #e4e8ef #e8dfcd #dde7e0")
+    text = toned("#f2f2f4 #f5f1ea #eff2f7 #f3ecdf #f2f4ee #1d1d1f #221e18 #171b23 #1c1526 #13211b")
+    muted = toned("#a1a1a7 #b0a89c #a2a9b8 #b0a3bf #9eb5ab #6e6e73 #6d665a #626a79 #6a5f73 #52675d")
+    faint = toned("#6c6c72 #786f64 #6a7180 #786b88 #688277 #a1a1a6 #a69e90 #9aa2b0 #a497a8 #8ea198")
+    tagInk = toned("#d1d1d6 #d8d0c4 #ccd3de #d6cce0 #cde0d6 #4a4a4f #4f483f #454d5c #4a3f55 #354b41")
+    badge = toned("#48484c #4f4840 #454c5a #4a3d5c #334d43 #e3e3e8 #e8e1d5 #dfe4ec #e9dfcf #dce7df")
+    sidebarFallback = toned("#2b2b2e #2f2b27 #282c34 #2a2236 #1f332c #ebebee #eee9df #e9edf3 #eee6d6 #e4ede6")
     segmentSelected = byAppearance(dark: "#636366", light: "#ffffff")
     // The light tints are the neutral one for every tone and season.
     sidebarTint =
@@ -129,6 +131,7 @@ struct SurfacePalette: Equatable, Sendable {
       case (true, .tone(.warm)): PanelColor(rgb: 0x281e12, alpha: 0.16)
       case (true, .tone(.cool)): PanelColor(rgb: 0x121c2e, alpha: 0.16)
       case (true, .season(.halloween)): PanelColor(rgb: 0x1e1230, alpha: 0.18)
+      case (true, .season(.christmas)): PanelColor(rgb: 0x0f261e, alpha: 0.18)
       case (false, _): PanelColor(rgb: 0xffffff, alpha: 0.22)
       }
     line = overlay(0.12, 0.13)
@@ -154,12 +157,19 @@ struct SurfacePalette: Equatable, Sendable {
 
   /// The three colours of a miniature window, as the Settings appearance cards and the welcome
   /// guide draw one: its background, the sidebar bar and a line of text. A season's also has a
-  /// moon in its corner.
+  /// moon in its corner and its horizon ink; a Liquid Glass miniature draws translucent panes over
+  /// a soft backdrop with a specular rim.
   struct Miniature: Equatable, Sendable {
     let background: PanelColor
     let bar: PanelColor
     let line: PanelColor
     var moon: PanelColor?
+    var horizonInk: PanelColor?
+    var isGlass: Bool = false
+    /// The soft aurora behind a Liquid Glass miniature so translucency reads at card size.
+    var glassBackdropTop: PanelColor?
+    var glassBackdropBottom: PanelColor?
+    var glassSheen: PanelColor?
   }
 
   /// A miniature of the panel in a season's look and an appearance.
@@ -168,12 +178,48 @@ struct SurfacePalette: Equatable, Sendable {
     case (.halloween, .dark):
       Miniature(
         background: PanelColor(rgb: 0x241b31), bar: PanelColor(rgb: 0x120d19),
-        line: PanelColor(rgb: 0x4a3d5c), moon: PanelColor(rgb: 0xf2e8cc))
+        line: PanelColor(rgb: 0x4a3d5c), moon: PanelColor(rgb: 0xf2e8cc),
+        horizonInk: PanelColor(rgb: 0x120e19))
     case (.halloween, .light):
       Miniature(
         background: PanelColor(rgb: 0xf3ead9), bar: PanelColor(rgb: 0xe2d6c0),
-        line: PanelColor(rgb: 0xcdbfa6), moon: PanelColor(rgb: 0xe0b25c))
+        line: PanelColor(rgb: 0xcdbfa6), moon: PanelColor(rgb: 0xe0b25c),
+        horizonInk: PanelColor(rgb: 0x120e19))
+    case (.christmas, .dark):
+      Miniature(
+        background: PanelColor(rgb: 0x162b24), bar: PanelColor(rgb: 0x0c1512),
+        line: PanelColor(rgb: 0x345247), moon: PanelColor(rgb: 0xeef6fa),
+        horizonInk: PanelColor(rgb: 0x0c1512))
+    case (.christmas, .light):
+      Miniature(
+        background: PanelColor(rgb: 0xe6f0e8), bar: PanelColor(rgb: 0xd3e2d7),
+        line: PanelColor(rgb: 0xb5c9bc), moon: PanelColor(rgb: 0xf2be5c),
+        horizonInk: PanelColor(rgb: 0x0c1512))
     }
+  }
+
+  /// A miniature of the panel in a window style (`solid` or `liquidGlass`), reflecting the active
+  /// tone or season and appearance.
+  static func miniature(
+    windowStyle: AppThemePreferences.WindowStyle, tone: AppThemePreferences.Tone, season: Season?,
+    appearance: PanelAppearance
+  ) -> Miniature {
+    let base =
+      season.map { miniature(season: $0, appearance: appearance) }
+      ?? miniature(tone: tone, appearance: appearance)
+    guard windowStyle == .liquidGlass else { return base }
+    let dark = appearance == .dark
+    return Miniature(
+      background: PanelColor(rgb: base.background.rgb, alpha: dark ? 0.54 : 0.60),
+      bar: PanelColor(rgb: base.bar.rgb, alpha: dark ? 0.62 : 0.68),
+      line: base.line,
+      moon: base.moon,
+      horizonInk: base.horizonInk,
+      isGlass: true,
+      glassBackdropTop: dark ? PanelColor(rgb: 0x3a86ff) : PanelColor(rgb: 0x7cf0ff),
+      glassBackdropBottom: dark ? PanelColor(rgb: 0x8a3dff) : PanelColor(rgb: 0x7c9eff),
+      glassSheen: dark ? PanelColor(rgb: 0xffffff, alpha: 0.24) : PanelColor(rgb: 0xffffff, alpha: 0.62)
+    )
   }
 
   /// A miniature of the panel in a tone and appearance. Warm and Cool tint only the background.

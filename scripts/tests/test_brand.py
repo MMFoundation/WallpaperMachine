@@ -119,7 +119,7 @@ print(String(data: try JSONSerialization.data(withJSONObject: [colors, joins, ed
                                            'Enlarged screen/frame joins must not expose a background seam')
 
     def test_dock_icons_are_the_asset_catalog_image_sets_the_app_loads(self):
-        for name in ('minimal', 'day', 'night', 'halloween'):
+        for name in ('minimal', 'day', 'night', 'halloween', 'christmas'):
             path = brand.dock_icon(name)
             with self.subTest(icon=name):
                 self.assertEqual(path.parent.name, f'AppIcon{name.capitalize()}.imageset')
@@ -187,7 +187,7 @@ for path in CommandLine.arguments.dropFirst() {
             self.assertLessEqual(max(frame_widths) - min(frame_widths), 3,
                                  'Dock variants must have consistent rendered frame thickness')
 
-    def test_halloween_dock_icon_is_the_night_tile_with_its_night_and_a_pumpkin_for_the_gear(self):
+    def test_seasonal_dock_icons_are_the_night_tile_with_each_seasons_night_and_emblem(self):
         if reason := ictool_skip_reason():
             self.skipTest(reason)
         with tempfile.TemporaryDirectory() as scratch:
@@ -196,32 +196,46 @@ for path in CommandLine.arguments.dropFirst() {
                     patch.object(brand, 'TRAY_ICON_SET', work / 'tray'), \
                     patch.object(brand, 'DOCK_ICONS', work / 'dock'):
                 brand.write_app_icons(work)
-                [path] = brand.write_seasonal_dock_icons(work)
-            self.assertEqual(path.parent.name, 'AppIconHalloween.imageset')
+                paths = brand.write_seasonal_dock_icons(work)
+            self.assertEqual(
+                [path.parent.name for path in paths],
+                ['AppIconHalloween.imageset', 'AppIconChristmas.imageset'])
             result = subprocess.run(['swift', '-e', r'''
 import AppKit
-let image = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
-// Margin, tile, top frame, panel interior, gear centre (the pumpkin) and the clearance above it.
-let points = [(0, 0), (180, 512), (512, 256), (330, 330), (327, 698), (327, 560)]
-let colors = points.map { x, y -> [Double] in
-    let c = image.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
-    return [c.redComponent, c.greenComponent, c.blueComponent, c.alphaComponent]
+for path in CommandLine.arguments.dropFirst() {
+    let image = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: path)))!
+    // Margin, tile, top frame, panel interior, gear centre (the emblem) and the clearance above it.
+    let points = [(0, 0), (180, 512), (512, 256), (330, 330), (327, 698), (327, 560)]
+    let colors = points.map { x, y -> [Double] in
+        let c = image.colorAt(x: x, y: y)!.usingColorSpace(.sRGB)!
+        return [c.redComponent, c.greenComponent, c.blueComponent, c.alphaComponent]
+    }
+    print(String(data: try JSONSerialization.data(withJSONObject: colors), encoding: .utf8)!)
 }
-print(String(data: try JSONSerialization.data(withJSONObject: colors), encoding: .utf8)!)
-''', str(path)], check=True, capture_output=True, text=True)
-            margin, tile, frame, panel, pumpkin, clearance = json.loads(result.stdout)
-            self.assertEqual(margin[3], 0, 'Dock margin must stay transparent')
-            for color in (tile, clearance):
-                self.assertGreater(color[3], 0.99)
-                self.assertLess(max(color[:3]), 0.06, 'The Night tile, and its clean cutout above the pumpkin')
-            for channel in frame[:3]:
-                self.assertAlmostEqual(channel, 1, delta=0.04, msg='The frame stays white')
-            self.assertGreater(panel[2], panel[1], 'The panel shows the violet night, not the aurora')
-            self.assertGreater(panel[2], 0.08, 'The panel is painted, not the bare tile')
-            red, green, blue, _ = pumpkin
-            self.assertGreater(red, 0.8, 'A pumpkin stands where the gear was')
-            self.assertGreater(red - green, 0.2)
-            self.assertGreater(green - blue, 0.1)
+''', *map(str, paths)], check=True, capture_output=True, text=True)
+            lines = result.stdout.splitlines()
+            self.assertEqual(len(lines), 2)
+            for name, line in zip(('halloween', 'christmas'), lines, strict=True):
+                with self.subTest(season=name):
+                    margin, tile, frame, panel, emblem, clearance = json.loads(line)
+                    self.assertEqual(margin[3], 0, 'Dock margin must stay transparent')
+                    for color in (tile, clearance):
+                        self.assertGreater(color[3], 0.99)
+                        self.assertLess(max(color[:3]), 0.06, 'The Night tile, and its clean cutout above the emblem')
+                    for channel in frame[:3]:
+                        self.assertAlmostEqual(channel, 1, delta=0.04, msg='The frame stays white')
+                    if name == 'halloween':
+                        self.assertGreater(panel[2], panel[1], 'The panel shows the violet night, not the aurora')
+                        self.assertGreater(panel[2], 0.08, 'The panel is painted, not the bare tile')
+                        red, green, blue, _ = emblem
+                        self.assertGreater(red, 0.8, 'A pumpkin stands where the gear was')
+                        self.assertGreater(red - green, 0.2)
+                        self.assertGreater(green - blue, 0.1)
+                    else:
+                        self.assertGreater(panel[1], panel[0], 'The panel shows the winter pine night')
+                        self.assertGreater(panel[1], 0.08, 'The panel is painted, not the bare tile')
+                        self.assertGreater(emblem[1], emblem[0], 'The Christmas tree sits in the gear opening')
+                        self.assertGreater(emblem[1], 0.35, 'The Christmas tree keeps its evergreen fill')
 
     @unittest.skipUnless(sys.platform == 'darwin', 'Requires macOS image tools')
     def test_website_icon_centers_the_display_frame(self):

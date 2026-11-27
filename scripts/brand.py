@@ -10,7 +10,7 @@ The wordmark is Manrope ("Wallpaper" bold, "Machine" medium), embedded as outlin
 
     python3 scripts/brand.py                      # native app, Dock choices, tray icon and DMG background
     python3 scripts/brand.py --dmg                # only Packaging/dmg/background.png and background@2x.png
-    python3 scripts/brand.py --seasonal           # only the seasonal Dock icons (AppIconHalloween)
+    python3 scripts/brand.py --seasonal           # only the seasonal Dock icons (AppIconHalloween, AppIconChristmas)
     python3 scripts/brand.py --website ../Site    # plus logo, favicons and manifest there
 
 The app icon exports vector layers for Icon Composer. Website app-icon PNGs reuse the
@@ -18,10 +18,10 @@ native Dock renders; website vectors share their geometry and appearances. Quick
 and sips render square web icons and tray assets. Dock choices use Icon Composer's
 macOS 26 renderer with a transparent outer margin and land in the AppIconMinimal, AppIconDay
 and AppIconNight image sets of `App/Resources/Assets.xcassets` (their Contents.json files are
-committed). A season's Dock icon (AppIconHalloween) is the Night tile with the season's papercut
-night in the panel and a jack-o'-lantern in the gear's place; that picture is committed under
-`Resources/Seasonal/`. The disk-image background is drawn with CoreGraphics and CoreText at 1x and 2x
-from `lib/dmg.py`'s window geometry.
+committed). A season's Dock icon (AppIconHalloween, AppIconChristmas) is the Night tile with the
+season's papercut night in the panel and a seasonal emblem (jack-o'-lantern or Christmas tree) in
+the gear's place; those pictures are committed under `Resources/Seasonal/`. The disk-image
+background is drawn with CoreGraphics and CoreText at 1x and 2x from `lib/dmg.py`'s window geometry.
 """
 from __future__ import annotations
 
@@ -90,6 +90,21 @@ PUMPKIN = dict(
     mouth=((3.33, 19.24), (4.29, 19.67), (4.86, 19.28), (5.9, 19.81), (6.94, 19.28), (7.51, 19.67), (8.47, 19.24)),
     mouth_curve=(5.9, 22.42),
     stem="M5.33 15.15L5.6 13.85Q6.07 13.15 6.99 13.41Q6.47 13.67 6.29 14.11L6.38 15.15Z",
+)
+
+# The Christmas evergreen tree in the gear's place, in the same 24-unit box; `AppMark` in the
+# panel draws the same outline, keeping the gear's clearance from the frame's end caps.
+CHRISTMAS = dict(
+    star_center=(5.9, 14.55),
+    star_outer=1.05,
+    star_inner=0.44,
+    boughs=(
+        (5.9, 15.25), (7.80, 17.45), (7.10, 17.25), (8.80, 19.50), (7.95, 19.30),
+        (9.65, 21.50), (2.15, 21.50), (3.85, 19.30), (3.00, 19.50), (4.70, 17.25),
+        (4.00, 17.45),
+    ),
+    trunk=((5.15, 21.35), (6.65, 21.35), (6.65, 22.75), (5.15, 22.75)),
+    ornaments=((5.15, 18.05, 0.56, "#ffd66b"), (6.85, 19.50, 0.60, "#ff4d57"), (4.60, 20.30, 0.54, "#ff4d57")),
 )
 
 # Standalone website artwork uses an inset macOS squircle; native masking belongs to macOS.
@@ -242,10 +257,38 @@ def pumpkin_markup() -> tuple[str, str]:
     return defs, shapes
 
 
+def christmas_markup() -> tuple[str, str]:
+    """(gradient defs, shapes) of the Christmas evergreen tree: lit from above, crowned with a gold star."""
+    sx, sy = CHRISTMAS["star_center"]
+    star_points = []
+    for index in range(10):
+        angle = -math.pi / 2 + index * math.pi / 5
+        radius = CHRISTMAS["star_outer"] if index % 2 == 0 else CHRISTMAS["star_inner"]
+        star_points.append((sx + radius * math.cos(angle), sy + radius * math.sin(angle)))
+
+    def polygon(points) -> str:
+        return "M" + "L".join(f"{num(x)} {num(y)}" for x, y in points) + "Z"
+
+    defs = (
+        '<linearGradient id="xm-tree" gradientUnits="userSpaceOnUse" x1="4.2" y1="14.9" x2="7.8" y2="21.5">'
+        '<stop offset="0" stop-color="#38b878"/><stop offset="0.55" stop-color="#1d8553"/>'
+        '<stop offset="1" stop-color="#0f5434"/></linearGradient>'
+        '<radialGradient id="xm-star" gradientUnits="userSpaceOnUse" cx="5.9" cy="13.9" r="1.4">'
+        '<stop offset="0" stop-color="#fff8d1"/><stop offset="1" stop-color="#f5b833"/></radialGradient>')
+    ornaments = "".join(
+        f'<circle cx="{num(cx)}" cy="{num(cy)}" r="{num(r)}" fill="{color}"/>'
+        for cx, cy, r, color in CHRISTMAS["ornaments"])
+    shapes = (f'<path d="{polygon(CHRISTMAS["trunk"])}" fill="#7a4b2a"/>'
+              f'<path d="{polygon(CHRISTMAS["boughs"])}" fill="url(#xm-tree)"/>'
+              f'<path d="{polygon(star_points)}" fill="url(#xm-star)"/>'
+              + ornaments)
+    return defs, shapes
+
+
 def icon_svg(variant: str = "regular", bleed: bool = False, square: bool = False,
              *, layer: str | None = None, appearance: str = "day") -> str:
     """Website icon, or a transparent layer for the native app icon: `screen`, `mark`, or for
-    a seasonal icon `frame`, `pumpkin` and `panel` (the screen's outline in black, a mask).
+    a seasonal icon `frame`, `pumpkin`, `christmas` and `panel` (the screen's outline in black, a mask).
 
     `bleed` drops the macOS margin; `square` also drops the rounded corners.
     """
@@ -297,12 +340,15 @@ def icon_svg(variant: str = "regular", bleed: bool = False, square: bool = False
     elif layer == "pumpkin":
         pumpkin_defs, mark = pumpkin_markup()
         defs += pumpkin_defs
+    elif layer == "christmas":
+        christmas_defs, mark = christmas_markup()
+        defs += christmas_defs
     elif layer == "panel":
         mark = f'<path d="{panel}" fill="#000"/>'
     else:
         mark = mark_markup(foreground, variant)
     artwork = (screen if layer == "screen"
-               else mark if layer in ("mark", "frame", "pumpkin", "panel") or appearance == "minimal"
+               else mark if layer in ("mark", "frame", "pumpkin", "christmas", "panel") or appearance == "minimal"
                else screen + mark)
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 {size} {size}">'
             f'<defs>{defs}</defs>{shape if layer is None else ""}'
@@ -463,14 +509,9 @@ def export_dock_tile(tool: Path, source: Path, rendition: str, image: Path, targ
 
 
 def write_seasonal_dock_icons(work: Path) -> list[Path]:
-    """The Halloween Dock icon: the Night tile, the papercut night clipped to the screen panel
-    and a jack-o'-lantern in the gear's place (`AppThemeStore.dockIconName` while it is on)."""
-    document_dir = work / "Halloween.icon"
-    assets = document_dir / "Assets"
-    assets.mkdir(parents=True, exist_ok=True)
-    (assets / "frame.svg").write_text(icon_svg(layer="frame"))
-    (assets / "pumpkin.svg").write_text(icon_svg(layer="pumpkin"))
-    mask = work / "halloween-panel-mask.png"
+    """The seasonal Dock icons: the Night tile, each season's papercut night clipped to the screen
+    panel and its emblem in the gear's place (`AppThemeStore.dockIconName` while a season is on)."""
+    mask = work / "seasonal-panel-mask.png"
     rasterize(icon_svg(layer="panel"), {mask: ICON_CANVAS}, work, template=True)
     # The panel's bounds on the 1024 canvas, as `icon_svg` places the layers.
     stroke = VARIANTS["regular"]["stroke"]
@@ -479,7 +520,7 @@ def write_seasonal_dock_icons(work: Path) -> list[Path]:
     x0 = ICON_CANVAS / 2 + (FRAME["left"] + inset - (FRAME["left"] + FRAME["right"]) / 2) * scale
     y0 = ICON_CANVAS / 2 + (FRAME["top"] + inset - (FRAME["top"] + FRAME["bottom"]) / 2) * scale
     side = (FRAME["right"] - FRAME["left"] - 2 * inset) * scale
-    subprocess.run(["swift", "-e", r'''
+    clip_swift = r'''
 import AppKit
 let arguments = CommandLine.arguments
 func load(_ path: String) -> CGImage {
@@ -507,19 +548,36 @@ guard let panel = context.makeImage(),
       let png = NSBitmapImageRep(cgImage: panel).representation(using: .png, properties: [:])
 else { fatalError("Cannot encode the panel") }
 try png.write(to: URL(fileURLWithPath: arguments[3]))
-''', str(SEASONAL / "halloween-night.jpg"), str(mask), str(assets / "screen.png"),
-                    *(f"{value:.3f}" for value in (x0, y0, side, side))], check=True, capture_output=True)
-    document = json.loads((APP_ICON / "icon.json").read_text())
-    document["fill-specializations"] = [{"value": {"solid": "srgb:0,0,0,1"}}]
-    document["groups"][0]["layers"] = [
-        {"image-name": "screen.png", "name": "Halloween night", "glass": False},
-        {"image-name": "frame.svg", "name": "Frame", "glass": False,
-         "fill-specializations": [{"value": {"solid": "srgb:1,1,1,1"}}]},
-        {"image-name": "pumpkin.svg", "name": "Jack-o'-lantern", "glass": False},
-    ]
-    (document_dir / "icon.json").write_text(json.dumps(document, indent=2) + "\n")
-    paths = list(export_dock_tile(ictool(), document_dir, "Default", work / "dock-halloween.png",
-                                  dock_icon("halloween")))
+'''
+    specs = (
+        ("halloween", "Halloween.icon", "halloween-night.jpg", "Halloween night", "pumpkin", "Jack-o'-lantern"),
+        ("christmas", "Christmas.icon", "christmas-night.jpg", "Christmas night", "christmas", "Christmas tree"),
+    )
+    frame_svg = icon_svg(layer="frame")
+    base_document = json.loads((APP_ICON / "icon.json").read_text())
+    tool = ictool()
+    paths: list[Path] = []
+    for name, doc_name, scene_file, scene_label, emblem_layer, emblem_label in specs:
+        document_dir = work / doc_name
+        assets = document_dir / "Assets"
+        assets.mkdir(parents=True, exist_ok=True)
+        (assets / "frame.svg").write_text(frame_svg)
+        emblem_file = f"{emblem_layer}.svg"
+        (assets / emblem_file).write_text(icon_svg(layer=emblem_layer))
+        subprocess.run(
+            ["swift", "-e", clip_swift, str(SEASONAL / scene_file), str(mask), str(assets / "screen.png"),
+             *(f"{value:.3f}" for value in (x0, y0, side, side))],
+            check=True, capture_output=True)
+        document = json.loads(json.dumps(base_document))
+        document["fill-specializations"] = [{"value": {"solid": "srgb:0,0,0,1"}}]
+        document["groups"][0]["layers"] = [
+            {"image-name": "screen.png", "name": scene_label, "glass": False},
+            {"image-name": "frame.svg", "name": "Frame", "glass": False,
+             "fill-specializations": [{"value": {"solid": "srgb:1,1,1,1"}}]},
+            {"image-name": emblem_file, "name": emblem_label, "glass": False},
+        ]
+        (document_dir / "icon.json").write_text(json.dumps(document, indent=2) + "\n")
+        paths.extend(export_dock_tile(tool, document_dir, "Default", work / f"dock-{name}.png", dock_icon(name)))
     add_dock_margins(paths)
     return paths[1::2]
 
@@ -752,7 +810,7 @@ def main() -> int:
     parser.add_argument("--website", type=Path, help="also write logo, favicons and manifest into this directory")
     parser.add_argument("--skip-app", action="store_true", help="do not touch native app, Dock or tray assets")
     parser.add_argument("--dmg", action="store_true", help="write only the disk-image background pair (Packaging/dmg)")
-    parser.add_argument("--seasonal", action="store_true", help="write only the seasonal Dock icons (AppIconHalloween)")
+    parser.add_argument("--seasonal", action="store_true", help="write only the seasonal Dock icons (AppIconHalloween, AppIconChristmas)")
     args = parser.parse_args()
     if sys.platform != "darwin":
         print(f"{MARK.missing} brand.py rasterizes with qlmanage and sips; macOS only", file=sys.stderr)

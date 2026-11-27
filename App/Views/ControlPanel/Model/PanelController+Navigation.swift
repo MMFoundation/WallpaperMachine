@@ -135,6 +135,22 @@ extension PanelController {
     theme.setHalloween(halloween)
   }
 
+  func setThemeChristmas(_ christmas: AppThemePreferences.Christmas) throws {
+    theme.setChristmas(christmas)
+  }
+
+  func setThemeWindowStyle(_ windowStyle: AppThemePreferences.WindowStyle) throws {
+    theme.setWindowStyle(windowStyle)
+  }
+
+  func previewThemeGlassTransparency(_ percent: Int) {
+    theme.previewGlassTransparency(percent)
+  }
+
+  func setThemeGlassTransparency(_ percent: Int) throws {
+    try theme.setGlassTransparency(percent)
+  }
+
   func resetTheme() { theme.reset() }
 
   // MARK: Language

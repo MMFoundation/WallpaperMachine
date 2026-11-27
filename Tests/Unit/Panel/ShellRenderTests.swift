@@ -504,20 +504,26 @@ final class ShellRenderTests: PanelTestCase {
         AccessibilityElement.everything(in: hosting).first { $0.identifier == "now-playing-playlist" })
       XCTAssertEqual(playlistButton.label, L("Playlist: \(L("Day and night"))"))
 
-      // Light + Halloween: the seasonal bar uses dark palettes, while its popovers must restore
+      // Light + seasonal: the seasonal bar uses dark palettes, while its popovers must restore
       // the window's light palettes via panelWindowLook().
+      for season in Season.allCases {
+        let light = PanelTheme(season: season, appearance: .light)
+        let dark = PanelTheme(season: season, appearance: .dark)
+        var seenTheme: PanelTheme?
+        let probe = NSHostingView(
+          rootView: NowPlayingWindowLookProbe { seenTheme = $0 }
+            .panelWindowLook()
+            .environment(\.panelTheme, dark)
+            .environment(\.panelWindowTheme, light))
+        probe.frame = NSRect(x: 0, y: 0, width: 10, height: 10)
+        probe.layoutSubtreeIfNeeded()
+        _ = probe.fittingSize
+        XCTAssertEqual(
+          seenTheme, light,
+          "panelWindowLook restores the window's light palette over the dark \(season.rawValue) bar")
+      }
       let light = PanelTheme(season: .halloween, appearance: .light)
       let dark = PanelTheme(season: .halloween, appearance: .dark)
-      var seenTheme: PanelTheme?
-      let probe = NSHostingView(
-        rootView: NowPlayingWindowLookProbe { seenTheme = $0 }
-          .panelWindowLook()
-          .environment(\.panelTheme, dark)
-          .environment(\.panelWindowTheme, light))
-      probe.frame = NSRect(x: 0, y: 0, width: 10, height: 10)
-      probe.layoutSubtreeIfNeeded()
-      _ = probe.fittingSize
-      XCTAssertEqual(seenTheme, light, "panelWindowLook restores the window's light palette over the dark seasonal bar")
 
       let details = NSHostingView(
         rootView: NowPlayingPlaylistDetails()

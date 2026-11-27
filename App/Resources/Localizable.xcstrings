@@ -5553,8 +5553,50 @@
     "Reset appearance" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Redefinir aparência"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "모양 재설정"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "外観をリセット"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "重置外观"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "重設外觀"}}}
     },
-    "Restores System, the default accent, Neutral tone, the Day icon and Halloween week." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Restaura Sistema, a cor de destaque padrão, o tom Neutro, o ícone Dia e a Semana do Halloween."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "‘시스템’, 기본 강조 색상, ‘중립’ 색조, ‘낮’ 아이콘 및 ‘핼러윈 주간’으로 복원합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「システム」、デフォルトのアクセントカラー、「ニュートラル」の色調、「昼」アイコン、「ハロウィン週間」に戻します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "恢复为跟随系统、默认强调色、中性色调、日间图标和万圣节周。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "恢復為「系統」、預設強調色、「中性」色調、「日間」圖像與「萬聖節週」。"}}}
+    "Restores System, the default accent, Neutral tone, Solid window, the Day icon and seasonal looks." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Restaura Sistema, a cor de destaque padrão, o tom Neutro, a janela Sólida, o ícone Dia e os visuais sazonais."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "‘시스템’, 기본 강조 색상, ‘중립’ 색조, ‘단색’ 창, ‘낮’ 아이콘 및 시즌 테마로 복원합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "「システム」、デフォルトのアクセントカラー、「ニュートラル」の色調、「ソリッド」ウインドウ、「昼」アイコン、季節の装いに戻します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "恢复为跟随系统、默认强调色、中性色调、纯色窗口、日间图标和节日装扮。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "恢復為「系統」、預設強調色、「中性」色調、「純色」視窗、「日間」圖像與節日裝扮。"}}}
+    },
+    "Window style" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Estilo da janela"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "창 스타일"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ウインドウスタイル"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "窗口样式"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "視窗樣式"}}}
+    },
+    "Solid" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Sólida"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "단색"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ソリッド"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "纯色"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "純色"}}}
+    },
+    "Liquid Glass" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Vidro Líquido"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "리퀴드 글래스"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リキッドグラス"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "液态玻璃"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "液態玻璃"}}}
+    },
+    "Chooses opaque window surfaces or translucent Liquid Glass." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Escolhe superfícies de janela opacas ou Vidro Líquido translúcido."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "불투명한 창 표면 또는 반투명 리퀴드 글래스를 선택합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "不透明なウインドウまたは半透明のリキッドグラスを選びます。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "选择不透明纯色窗口或半透明液态玻璃外观。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "選擇不透明純色視窗或半透明液態玻璃外觀。"}}}
+    },
+    "Window transparency" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Transparência da janela"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "창 투명도"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ウインドウの透明度"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "窗口透明度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "視窗透明度"}}}
+    },
+    "Transparency" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Transparência"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "투명도"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "透明度"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "透明度"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "透明度"}}}
+    },
+    "Controls how much shows through the Liquid Glass window." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Controla o quanto aparece através da janela em Vidro Líquido."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "리퀴드 글래스 창 뒤가 비치는 정도를 조절합니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "リキッドグラスのウインドウの透け具合を調整します。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "调节液态玻璃窗口透出背景的程度。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "調整液態玻璃視窗透出背景的程度。"}}}
+    },
+    "Switch Window style to Liquid Glass to adjust transparency." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Mude o Estilo da janela para Vidro Líquido para ajustar a transparência."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "투명도를 조절하려면 창 스타일을 리퀴드 글래스로 전환하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "透明度を調整するには、ウインドウスタイルをリキッドグラスに切り替えてください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "将窗口样式切换为“液态玻璃”即可调节透明度。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將視窗樣式切換為「液態玻璃」即可調整透明度。"}}}
+    },
+    "macOS Reduce Transparency is on, so the window stays opaque." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Reduzir Transparência do macOS está ativado, então a janela permanece opaca."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "macOS의 투명도 줄이기가 켜져 있어 창이 불투명하게 유지됩니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "macOSの「透明度を下げる」がオンのため、ウインドウは不透明のままになります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "macOS 已开启“降低透明度”，因此窗口保持不透明。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "macOS 已開啟「減少透明度」，因此視窗保持不透明。"}}}
+    },
+    "Christmas look" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Visual de Natal"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "크리스마스 테마"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "クリスマスの装い"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "圣诞节装扮"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "聖誕節裝扮"}}}
+    },
+    "Christmas week" : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Semana do Natal"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "크리스마스 주간"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "クリスマス週間"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "圣诞周"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "聖誕週"}}}
+    },
+    "Dresses the window, its accent and the Dock icon for Christmas. Christmas week runs from December 18 to December 26." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Veste a janela, a cor de destaque e o ícone do Dock para o Natal. A Semana do Natal vai de 18 a 26 de dezembro."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "창, 강조 색상 및 Dock 아이콘을 크리스마스 분위기로 꾸밉니다. 크리스마스 주간은 12월 18일부터 12월 26일까지입니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ウインドウ、アクセントカラー、Dockアイコンをクリスマス仕様にします。クリスマス週間は12月18日から12月26日までです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "为窗口、强调色和程序坞图标换上圣诞节装扮。圣诞周为 12 月 18 日至 12 月 26 日。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "為視窗、強調色與 Dock 圖像換上聖誕節裝扮。聖誕週為 12 月 18 日至 12 月 26 日。"}}}
+    },
+    "On until December 26. Your own accent, tone and Dock icon come back after." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ativo até 26 de dezembro. Sua cor de destaque, tom e ícone do Dock voltam depois."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "12월 26일까지 적용됩니다. 이후 원래의 강조 색상, 색조 및 Dock 아이콘으로 돌아갑니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "12月26日まで適用されます。その後、元のアクセントカラー、色調、Dockアイコンに戻ります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "将持续到 12 月 26 日。之后会恢复你自己的强调色、色调和程序坞图标。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "將持續到 12 月 26 日。之後會恢復你自己的強調色、色調與 Dock 圖像。"}}}
+    },
+    "On all year. Your own accent, tone and Dock icon come back when you choose Christmas week or Off." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Ativo o ano todo. Sua cor de destaque, tom e ícone do Dock voltam quando você escolher Semana do Natal ou Desativado."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "연중 적용됩니다. ‘크리스마스 주간’ 또는 ‘끔’을 선택하면 원래의 강조 색상, 색조 및 Dock 아이콘으로 돌아갑니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "一年中適用されます。「クリスマス週間」または「オフ」を選ぶと、元のアクセントカラー、色調、Dockアイコンに戻ります。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "全年生效。选择“圣诞周”或“关闭”后，会恢复你自己的强调色、色调和程序坞图标。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "全年生效。選擇「聖誕週」或「關閉」後，會恢復你自己的強調色、色調與 Dock 圖像。"}}}
     },
     "Halloween look" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Visual de Halloween"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "핼러윈 테마"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "ハロウィンの装い"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "万圣节装扮"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "萬聖節裝扮"}}}

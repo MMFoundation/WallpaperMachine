@@ -161,6 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     let terminateApplication: @MainActor () -> Void
     private var themeSubscription: AnyCancellable?
     private var iconSubscription: AnyCancellable?
+    private var windowStyleSubscription: AnyCancellable?
     private var diagnostics: RuntimeDiagnosticsSession?
 
     init(terminateApplication: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
@@ -190,6 +191,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     NSApp.applicationIconImage = try AppThemePreferences.dockImage(named: name)
                 } catch {
                     AppLog.error("Dock icon \(name) could not load: \(error.localizedDescription)")
+                }
+            }
+        let reduceTransparencyChanged = NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification)
+            .map { _ in () }
+            .prepend(())
+        windowStyleSubscription = AppThemeStore.shared.$preferences
+            .map(\.windowStyle).removeDuplicates()
+            .combineLatest(reduceTransparencyChanged)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] style, _ in
+                MainActor.assumeIsolated {
+                    guard let window = self?.controlPanelWindow else { return }
+                    ControlPanelWindow.applyWindowStyle(style, to: window)
                 }
             }
         AppLog.info("startup: didFinishLaunching start")
@@ -2071,6 +2086,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             hosting.sizingOptions = []
             hosting.sceneBridgingOptions = [.toolbars, .title]
             let window = ControlPanelWindow.make(contentViewController: hosting, delegate: self)
+            ControlPanelWindow.applyWindowStyle(AppThemeStore.shared.preferences.windowStyle, to: window)
             if !window.setFrameUsingName(ControlPanelWindow.frameAutosaveName) { window.center() }
             ControlPanelWindow.constrainToScreen(window)
             // After the saved frame is restored, so restoring does not overwrite it.

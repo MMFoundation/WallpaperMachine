@@ -23,11 +23,17 @@ struct NowPlayingBar: View {
 
   @Environment(PanelController.self) private var controller
   @Environment(\.panelTheme) private var theme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
   var body: some View {
     let ground = theme.season.map { PanelTheme(season: $0, appearance: .dark) }
+    let barBackground =
+      theme.season.map {
+        SeasonHorizon.ink(for: $0).color.opacity(
+          theme.seasonalGroundOpacity(reduceTransparency: reduceTransparency))
+      } ?? theme.surfaceFill(reduceTransparency: reduceTransparency)
     bar
-      .background(ground == nil ? theme.surface.surface.color : SeasonHorizon.ink.color)
+      .background(barBackground)
       .overlay(alignment: .top) {
         if ground == nil {
           Rectangle().fill(theme.surface.line.color).frame(height: 0.5)
