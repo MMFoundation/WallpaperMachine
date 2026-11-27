@@ -1213,7 +1213,7 @@ extern "C" int owe_scene_wallpaper_set_property_int32(
     }
     if (std::string_view(name) == wallpaper::PROPERTY_SCALINGMODE &&
         ! wallpaper::WallpaperScalingModeFromValue(value)) {
-        return fail("the scaling mode must be between 0 and 4");
+        return fail("the scaling mode must be between 0 and 5");
     }
     return guarded([&] {
         scene->scene.setPropertyInt32(name, value);

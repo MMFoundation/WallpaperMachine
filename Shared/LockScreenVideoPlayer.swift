@@ -227,7 +227,7 @@ final class LockScreenVideoPlayer: LockScreenVideoPlaying {
       break
     }
     // A Fit-style clip sits on its project's scheme colour; Fill and Stretch stay black.
-    let fitStyle = mode != .fill && mode != .stretch
+    let fitStyle = mode != .fill && mode != .fillBlurred && mode != .stretch
     let background = (fitStyle ? borderColor : nil) ?? CGColor(gray: 0, alpha: 1)
     layer.backgroundColor = background
     root?.backgroundColor = background

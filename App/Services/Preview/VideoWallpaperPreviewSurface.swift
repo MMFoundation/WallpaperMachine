@@ -303,7 +303,7 @@ final class VideoWallpaperPreviewSurface: WallpaperPreviewSurface {
         switch NativeVideoScalingMode(rendererValue: scalingMode) ?? .fill {
         case .stretch: return .resize
         case .match, .matchBlurred, .none: return .resizeAspect
-        case .fill: return .resizeAspectFill
+        case .fill, .fillBlurred: return .resizeAspectFill
         }
     }
 }

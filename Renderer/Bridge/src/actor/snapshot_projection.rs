@@ -219,6 +219,7 @@ pub(super) fn project_monitors<'a>(
                     BridgeScalingMode::Match => "Match",
                     BridgeScalingMode::Fill => "Fill",
                     BridgeScalingMode::MatchBlurred => "MatchBlurred",
+                    BridgeScalingMode::FillBlurred => "FillBlurred",
                 }
                 .to_owned(),
                 target_fps: render

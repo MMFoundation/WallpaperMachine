@@ -3200,6 +3200,7 @@ impl From<BridgeScalingMode> for ScalingMode {
             BridgeScalingMode::Match => Self::Fit,
             BridgeScalingMode::Fill => Self::Fill,
             BridgeScalingMode::MatchBlurred => Self::FitBlurred,
+            BridgeScalingMode::FillBlurred => Self::FillBlurred,
         }
     }
 }
@@ -3212,6 +3213,7 @@ impl From<ScalingMode> for BridgeScalingMode {
             ScalingMode::Fit => Self::Match,
             ScalingMode::Fill => Self::Fill,
             ScalingMode::FitBlurred => Self::MatchBlurred,
+            ScalingMode::FillBlurred => Self::FillBlurred,
         }
     }
 }

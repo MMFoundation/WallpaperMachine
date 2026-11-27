@@ -313,6 +313,14 @@ final class PanelDisplayActionsTests: PanelTestCase {
       try await controller.setDisplay("secondary", .scalingMode(.matchBlurred))
       XCTAssertEqual(bridge.calls.last, "setMirrorScalingMode secondary matchBlurred")
       XCTAssertEqual(controller.displayRows[1].scalingMode, .matchBlurred)
+
+      try await controller.setDisplay("primary", .scalingMode(.fillBlurred))
+      XCTAssertEqual(controller.displayRows[0].scalingMode, .fillBlurred)
+      XCTAssertEqual(controller.displayRows[1].scalingMode, .matchBlurred)
+
+      try await controller.setDisplay("secondary", .scalingMode(.fillBlurred))
+      XCTAssertEqual(bridge.calls.last, "setMirrorScalingMode secondary fillBlurred")
+      XCTAssertEqual(controller.displayRows[1].scalingMode, .fillBlurred)
     }
   }
 

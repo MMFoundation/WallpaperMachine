@@ -25,6 +25,15 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-27 — Fill with blurred backdrop (#268)
+
+- Added WallpaperScalingMode::FILL_BLURRED (5, fill_blurred, FillBlurred) across C++ Metal renderer, Rust core/bridge, Swift bindings, native video/lock-screen/preview layout, inspector, Settings > Displays, localization and docs.
+- python3 scripts/build.py --renderer-only -> OK (cargo release build + uniffi-bindgen Swift bindings regenerated).
+- python3 scripts/check_rust.py -> OK (core 447 passed, 5 desktop_window excluded; bridge 1004 passed; core-integration 20 passed; shader all passed; desktop/media/network opt-ins disabled).
+- python3 scripts/check_renderer.py -> OK (exit 0; backdrop_geometry_test, backdrop_scene_test, hdr_output_gpu_test, unchanged_present_test, metal_scene_draw_smoke, 12 generated cases + reload cycles; 7 local-asset/corpus tests skipped).
+- python3 scripts/test.py -> OK (all 37 Python test files passed; native unit/integration 5423 passed, 0 failed, 70 skipped; initial run had 1 unrelated PixivStoreTests timeout before clean rerun).
+- Gaps: live desktop, lock-screen, Mission Control and panel visual appearance not inspected on a display (no authorized desktop run); Release app not rebuilt.
+
 ## 2026-11-26 — Lock-screen hover cursor reactivity (#266)
 
 - Added Shared/LockScreenPointerTracker.swift, DOM hover delivery in WebWallpaperProtocol/ScreenSaverWebSurface, and extension hover tracking in WallpaperSurface/WallpaperController for active lock-screen Scene and Web surfaces.
@@ -100,11 +109,3 @@ entry's recorded result is not allowed.
 - Localization: App/Resources/Localizable.xcstrings edited as text (+38 new keys across en, ja, ko, pt-BR, zh-Hans, zh-Hant; -1 superseded unreferenced key); catalog and panel localization suites passed.
 - Code review: verifier-w2b re-verified all fixes and signed off PASS (no blockers).
 - Not run: Release build (not requested), opt-in --ui desktop tests, and live visual inspection.
-
-## 2026-11-25 — Wave 2A UI/UX workflow upgrades (#8, #9, #10, #11, #16)
-
-- Scope: three-page clickable tags, ActiveFilterChipsBar, Workshop Hide installed (#8); Collections scope menu, quick actions, target display wallpaper titles, inline playlist controls (#9); Inspector search/modified/collapsible headings, artwork Preview, Preview shortcuts/Apply (#10); Menu Bar dynamic scroll/compact picker/Mute All/playlist badge/reveal (#11); Shift+Arrow, Cmd+S, Placement pinch/Option+scroll/double-click/center guides, Preset Update & Apply & Save (#16).
-- Routine gate: python3 scripts/test.py — PASS (36/36 Python suites OK; 5251 passed, 0 failed, 70 skipped of 5321 native tests in 161s).
-- Localization: App/Resources/Localizable.xcstrings +37/-1 keys across all 6 shipped languages (en, ja, ko, pt-BR, zh-Hans, zh-Hant), verified by test_localization_catalogs.py and test_panel_localization.py.
-- Review: verifier-w2a read-only review PASS (0 blockers after fixing 3 must-fix and 3 nit findings with added unit tests).
-- Not run: Release build (not requested), --ui desktop tests, and live visual inspection.

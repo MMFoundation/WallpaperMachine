@@ -100,7 +100,7 @@ struct LockScreenScene: Codable, Equatable {
   var assetsPath: String
   var previewPath: String?
   var fps: UInt32
-  /// Native renderer values: none=0, stretch=1, fit=2, fill=3.
+  /// Native renderer values: none=0, stretch=1, fit=2, fill=3, fit_blurred=4, fill_blurred=5.
   var scalingMode: Int32
   var scalingFactor: Double
   var propertiesJSON: String?

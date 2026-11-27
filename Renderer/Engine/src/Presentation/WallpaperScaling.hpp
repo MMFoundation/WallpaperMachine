@@ -16,7 +16,16 @@ enum class WallpaperScalingMode : std::uint8_t
     FILL = 3,
     /// Fit, with a blurred copy of the picture in the room the picture leaves.
     FIT_BLURRED = 4,
+    /// Fill, with a blurred copy of the picture in the room left when scaled down.
+    FILL_BLURRED = 5,
 };
+
+/// Whether `mode` fills room around the picture with a blurred copy of it.
+constexpr bool WallpaperScalingModeHasBlurredBackdrop(WallpaperScalingMode mode) noexcept
+{
+    return mode == WallpaperScalingMode::FIT_BLURRED ||
+           mode == WallpaperScalingMode::FILL_BLURRED;
+}
 
 /// The mode a host value names, or nothing when no mode has that value.
 std::optional<WallpaperScalingMode> WallpaperScalingModeFromValue(int64_t value);

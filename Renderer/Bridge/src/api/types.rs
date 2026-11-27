@@ -78,6 +78,9 @@ pub enum BridgeScalingMode {
     /// `Match`'s picture, with the room around it filled by a blurred,
     /// darkened copy of the same picture.
     MatchBlurred,
+    /// `Fill`'s picture, with any room left when scaled down filled by a
+    /// blurred, darkened copy of the same picture.
+    FillBlurred,
 }
 
 /// Where a wallpaper sits on one display when that display leaves room around

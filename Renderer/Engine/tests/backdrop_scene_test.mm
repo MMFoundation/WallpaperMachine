@@ -30,9 +30,10 @@ using wallpaper::ComputeWallpaperScalingLayout;
 using wallpaper::PixelRect;
 using wallpaper::WallpaperScalingMode;
 
-constexpr auto kFit     = WallpaperScalingMode::FIT;
-constexpr auto kFill    = WallpaperScalingMode::FILL;
-constexpr auto kBlurred = WallpaperScalingMode::FIT_BLURRED;
+constexpr auto kFit         = WallpaperScalingMode::FIT;
+constexpr auto kFill        = WallpaperScalingMode::FILL;
+constexpr auto kBlurred     = WallpaperScalingMode::FIT_BLURRED;
+constexpr auto kFillBlurred = WallpaperScalingMode::FILL_BLURRED;
 
 struct Case {
     const char* name;
@@ -597,6 +598,198 @@ TEST_F(BackdropScene, TheCopyAddsNoPassToAFrame)
         for (size_t i = 0; i < fit.size(); ++i) {
             EXPECT_EQ(blurred[i].total(), fit[i].total()) << c->name << " frame " << i;
             EXPECT_EQ(blurred[i].scene_output_passes, fit[i].scene_output_passes) << c->name << " frame " << i;
+        }
+    }
+}
+
+// ---- Fill with blurred backdrop ----------------------------------------------------------
+
+TEST_F(BackdropScene, FillWithBackdropAtFactorOneDrawsNoCopyAndMatchesFill)
+{
+    for (const Case* c : { &kBarsLeftRight, &kBarsAboveBelow, &kExactFit }) {
+        SCOPED_TRACE(c->name);
+        ASSERT_FALSE(LayoutOf(*c, kFillBlurred, 1.0).backdrop);
+        Showing fill(*c, kFill, 1.0);
+        Showing blurred(*c, kFillBlurred, 1.0);
+        ASSERT_TRUE(fill.scene().ok()) << fill.scene().error();
+        ASSERT_TRUE(blurred.scene().ok()) << blurred.scene().error();
+        const Image a = fill.Picture();
+        const Image b = blurred.Picture();
+        ASSERT_FALSE(a.empty());
+        EXPECT_EQ(a.rgba, b.rgba);
+        EXPECT_EQ(blurred.Bytes(), fill.Bytes()) << "nothing is held while Fill covers the display";
+    }
+}
+
+TEST_F(BackdropScene, FillWithBackdropScaledDownFillsSurroundAndKeepsFillsPicture)
+{
+    const struct { const Case* c; double factor; } cases[] = {
+        { &kExactFit, 0.7 },       // room on all four sides (large picture -> 8-bit step)
+        { &kBarsLeftRight, 0.8 },  // room on left/right while height still fills
+        { &kBarsAboveBelow, 0.7 }, // room above/below while width still fills
+        { &kMirrored, 0.7 },       // mirrored picture and mirrored copy
+    };
+    for (const auto& entry : cases) {
+        const Case& c = *entry.c;
+        SCOPED_TRACE(std::string(c.name) + " factor " + std::to_string(entry.factor));
+        const auto layout = LayoutOf(c, kFillBlurred, entry.factor);
+        const PixelRect picture = Shown(layout);
+        ASSERT_TRUE(layout.backdrop);
+
+        Showing fill(c, kFill, entry.factor);
+        Showing blurred(c, kFillBlurred, entry.factor);
+        ASSERT_TRUE(fill.scene().ok()) << fill.scene().error();
+        ASSERT_TRUE(blurred.scene().ok()) << blurred.scene().error();
+        const Image fill_picture = fill.Picture();
+        const Image blurred_picture = blurred.Picture();
+
+        EXPECT_TRUE(SameInside(blurred_picture, fill_picture, picture)) << "the picture is Fill's";
+
+        const BarStats fill_bars = Bars(fill_picture, picture);
+        ASSERT_GT(fill_bars.pixels, 0u);
+        EXPECT_EQ(fill_bars.black, fill_bars.pixels);
+
+        const BarStats bars = Bars(blurred_picture, picture);
+        EXPECT_EQ(bars.pixels, fill_bars.pixels);
+        EXPECT_EQ(bars.black, 0u) << "the copy fills every pixel outside the scaled-down picture";
+        EXPECT_LE(bars.worst_step, 4);
+
+        int worst = 0;
+        for (uint32_t y = 0; y < blurred_picture.height; ++y) {
+            for (uint32_t x = 0; x < blurred_picture.width; ++x) {
+                if (Inside(picture, x, y)) continue;
+                const auto want = Expected(layout, c.mirrored, x, y);
+                const Rgba got  = blurred_picture.At(x, y);
+                for (int ch = 0; ch < 3; ++ch) {
+                    worst = std::max(worst, int(std::lround(std::abs(got[ch] - want[ch]))));
+                }
+            }
+        }
+        EXPECT_LE(worst, 5) << "the copy is Fill at factor 1, darkened to 70%";
+    }
+}
+
+TEST_F(BackdropScene, FillWithBackdropIgnoresSchemeColourInBars)
+{
+    ScenePackage package;
+    MakeGradientScene(package, kBarsLeftRight);
+    package.SetProject({ { "schemecolor", { { "type", "color" }, { "text", "Scheme" }, { "value", "0 0 1" } } } });
+    GpuScene scene(package, OptionsFor(kBarsLeftRight));
+    ASSERT_TRUE(scene.ok()) << scene.error();
+    scene.renderer().SetWallpaperScalingMode(kFillBlurred);
+    scene.renderer().SetWallpaperScalingFactor(0.7);
+    const auto layout = LayoutOf(kBarsLeftRight, kFillBlurred, 0.7);
+    const auto blue = BarsOfColour(scene.Run(3), Shown(layout), { 0, 0, 255, 255 });
+    ASSERT_GT(blue.second, 0u);
+    EXPECT_EQ(blue.first, 0u) << "Fill with blurred backdrop never clears bars to schemecolor";
+}
+
+TEST_F(BackdropScene, FillWithBackdropMovingTheShrunkPictureKeepsTheCopyFixed)
+{
+    const Case& c = kBarsLeftRight;
+    Showing centred(c, kFillBlurred, 0.6);
+    ASSERT_TRUE(centred.scene().ok()) << centred.scene().error();
+    const Image middle = centred.Picture();
+
+    Showing moved(c, kFillBlurred, 0.6);
+    ASSERT_TRUE(moved.scene().ok()) << moved.scene().error();
+    moved.scene().renderer().SetWallpaperFraming({ 0.0, 0.0 });
+    const Image corner = moved.Picture();
+
+    const auto centred_layout = ComputeWallpaperScalingLayout(kFillBlurred, c.canvas_w, c.canvas_h, c.display_w, c.display_h, 1.0, 0.6);
+    const auto corner_layout  = ComputeWallpaperScalingLayout(kFillBlurred, c.canvas_w, c.canvas_h, c.display_w, c.display_h, 1.0, 0.6, 0.0, 0.0);
+    ASSERT_NE(centred_layout.viewport_px.x, corner_layout.viewport_px.x);
+    size_t compared = 0;
+    for (uint32_t y = 0; y < middle.height; ++y) {
+        for (uint32_t x = 0; x < middle.width; ++x) {
+            if (Inside(Shown(centred_layout), x, y) || Inside(Shown(corner_layout), x, y)) continue;
+            ASSERT_EQ(middle.At(x, y), corner.At(x, y)) << x << "," << y;
+            ++compared;
+        }
+    }
+    EXPECT_GT(compared, 1000u);
+}
+
+TEST_F(BackdropScene, FillWithBackdropHoldsMemoryOnlyWhileScaledDown)
+{
+    const Case& c = kBarsLeftRight;
+    Showing fill(c, kFill, 1.0);
+    ASSERT_TRUE(fill.scene().ok()) << fill.scene().error();
+    ASSERT_FALSE(fill.Picture().empty());
+    const uint64_t fill_bytes = fill.Bytes();
+
+    Showing showing(c, kFillBlurred, 1.0);
+    ASSERT_TRUE(showing.scene().ok()) << showing.scene().error();
+    ASSERT_FALSE(showing.Picture().empty());
+    EXPECT_EQ(showing.Bytes(), fill_bytes) << "no backdrop images at scale 1.0";
+
+    showing.scene().renderer().SetWallpaperScalingFactor(0.7);
+    ASSERT_TRUE(showing.scene().Step(1)) << showing.scene().error();
+    const uint64_t held = showing.Bytes();
+    EXPECT_GE(held, fill_bytes + 2 * 128 * 72 * 8);
+    EXPECT_LT(held, fill_bytes + 4 * 1024 * 1024);
+
+    showing.scene().renderer().SetWallpaperScalingFactor(1.0);
+    ASSERT_TRUE(showing.scene().Step(1)) << showing.scene().error();
+    EXPECT_EQ(showing.Bytes(), fill_bytes) << "images released as soon as scale returns to 1.0";
+
+    showing.scene().renderer().SetWallpaperScalingFactor(0.7);
+    ASSERT_TRUE(showing.scene().Step(1)) << showing.scene().error();
+    EXPECT_EQ(showing.Bytes(), held);
+
+    showing.scene().renderer().SetWallpaperScalingMode(kFill);
+    ASSERT_TRUE(showing.scene().Step(1)) << showing.scene().error();
+    EXPECT_EQ(showing.Bytes(), fill_bytes);
+}
+
+TEST_F(BackdropScene, SwitchingBetweenFillAndFillBlurredWhenScaledDownPresentsAndSkipsUnchanged)
+{
+    wallpaper::RendererCounters counters;
+    wallpaper::RendererCounters::SetEnabled(true);
+    struct Off { ~Off() { wallpaper::RendererCounters::SetEnabled(false); } } off;
+
+    Showing showing(kBarsLeftRight, kFill, 0.7);
+    ASSERT_TRUE(showing.scene().ok()) << showing.scene().error();
+    showing.scene().renderer().SetCounters(&counters);
+    const auto skipped = [&] { return counters.Get(OWE_RC_PRESENTS_SKIPPED_UNCHANGED); };
+
+    ASSERT_TRUE(showing.scene().Step(4)) << showing.scene().error();
+    const Image with_bars = showing.scene().Picture();
+    const uint64_t before_switch = skipped();
+    EXPECT_GT(before_switch, 0u);
+
+    showing.scene().renderer().SetWallpaperScalingMode(kFillBlurred);
+    ASSERT_TRUE(showing.scene().Step(1)) << showing.scene().error();
+    EXPECT_EQ(skipped(), before_switch) << "switching to FillBlurred presents again";
+    const Image copy = showing.scene().Picture();
+    EXPECT_NE(copy.rgba, with_bars.rgba);
+
+    ASSERT_TRUE(showing.scene().Step(3)) << showing.scene().error();
+    EXPECT_EQ(skipped(), before_switch + 3) << "repeated static frames skip presentation";
+    EXPECT_EQ(showing.scene().Picture().rgba, copy.rgba);
+
+    showing.scene().renderer().SetWallpaperScalingMode(kFill);
+    ASSERT_TRUE(showing.scene().Step(1)) << showing.scene().error();
+    EXPECT_EQ(skipped(), before_switch + 3) << "switching back to Fill presents again";
+    EXPECT_EQ(showing.scene().Picture().rgba, with_bars.rgba);
+}
+
+TEST_F(BackdropScene, FillWithBackdropAddsNoScenePass)
+{
+    const auto passes = [&](const Case& c, WallpaperScalingMode mode) {
+        Showing showing(c, mode, 0.7, false);
+        EXPECT_TRUE(showing.scene().ok()) << showing.scene().error();
+        EXPECT_TRUE(showing.scene().Step(3)) << showing.scene().error();
+        return showing.scene().FramePasses();
+    };
+    for (const Case* c : { &kBarsLeftRight, &kLargeAboveBelow }) {
+        const auto fill    = passes(*c, kFill);
+        const auto blurred = passes(*c, kFillBlurred);
+        ASSERT_EQ(fill.size(), 3u);
+        ASSERT_EQ(blurred.size(), 3u);
+        for (size_t i = 0; i < fill.size(); ++i) {
+            EXPECT_EQ(blurred[i].total(), fill[i].total()) << c->name << " frame " << i;
+            EXPECT_EQ(blurred[i].scene_output_passes, fill[i].scene_output_passes) << c->name << " frame " << i;
         }
     }
 }

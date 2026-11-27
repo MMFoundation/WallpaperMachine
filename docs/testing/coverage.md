@@ -1262,8 +1262,9 @@ need an authorized runtime check
   factor 1 stay AVFoundation's gravity while Original size and a factor wait for the
   picture's size, and a position (the room is divided as the renderer divides it, an unusable
   one is held to the edge or the middle, and any position but the middle needs an explicit
-  frame because gravity centres); Fit with blurred backdrop is laid out exactly as Fit,
-  black bars and all, since the player has no blurred fill. The host suite checks the user's mode, factor and position reach
+  frame because gravity centres); Fit with blurred backdrop and Fill with blurred backdrop
+  are laid out as Fit and Fill respectively, keeping black bars since the player has no
+  blurred fill. The host suite checks the user's mode, factor and position reach
   a running surface without reopening or re-probing it, each display keeping its own, and the
   desktop-picture poster is drawn with the same layout (Fit leaves black bars, Original size is
   not scaled to the display, a factor zooms, a position puts the picture in its corner); the

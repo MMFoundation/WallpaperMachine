@@ -10,7 +10,7 @@ namespace wallpaper
 std::optional<WallpaperScalingMode> WallpaperScalingModeFromValue(int64_t value)
 {
     if (value < static_cast<int64_t>(WallpaperScalingMode::NONE) ||
-        value > static_cast<int64_t>(WallpaperScalingMode::FIT_BLURRED)) {
+        value > static_cast<int64_t>(WallpaperScalingMode::FILL_BLURRED)) {
         return std::nullopt;
     }
     return static_cast<WallpaperScalingMode>(value);
@@ -48,7 +48,8 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
         break;
     case WallpaperScalingMode::FIT:
     case WallpaperScalingMode::FIT_BLURRED: scale_x = scale_y = std::min(ratio_x, ratio_y); break;
-    case WallpaperScalingMode::FILL: scale_x = scale_y = std::max(ratio_x, ratio_y); break;
+    case WallpaperScalingMode::FILL:
+    case WallpaperScalingMode::FILL_BLURRED: scale_x = scale_y = std::max(ratio_x, ratio_y); break;
     case WallpaperScalingMode::NONE:
     default: break;
     }
@@ -72,7 +73,7 @@ WallpaperScalingLayout ComputeWallpaperScalingLayout(
                                      px(content_h * dpr) };
     layout.scissor_px  = PixelRect { 0, 0, px(display_w * dpr), px(display_h * dpr) };
 
-    if (mode == WallpaperScalingMode::FIT_BLURRED) {
+    if (WallpaperScalingModeHasBlurredBackdrop(mode)) {
         // The copy covers the display the way Fill at a factor of 1 would and stays centred:
         // neither the picture's position nor its factor moves it.
         const double fill_scale = std::max(ratio_x, ratio_y);

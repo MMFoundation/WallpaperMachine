@@ -481,6 +481,7 @@ pub(crate) fn scaling_mode_property_value(mode: ScalingMode) -> i32 {
         ScalingMode::Fit => 2,
         ScalingMode::Fill => 3,
         ScalingMode::FitBlurred => 4,
+        ScalingMode::FillBlurred => 5,
     }
 }
 

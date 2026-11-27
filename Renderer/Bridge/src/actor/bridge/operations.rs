@@ -1053,6 +1053,7 @@ fn core_scaling_mode(mode: BridgeScalingMode) -> ScalingMode {
         BridgeScalingMode::Match => ScalingMode::Fit,
         BridgeScalingMode::Fill => ScalingMode::Fill,
         BridgeScalingMode::MatchBlurred => ScalingMode::FitBlurred,
+        BridgeScalingMode::FillBlurred => ScalingMode::FillBlurred,
     }
 }
 

@@ -352,7 +352,7 @@ final class WebMPlayer {
     case .pending:
       break
     }
-    let fitStyle = mode != .fill && mode != .stretch
+    let fitStyle = mode != .fill && mode != .fillBlurred && mode != .stretch
     root?.backgroundColor = (fitStyle ? borderColor : nil) ?? CGColor(gray: 0, alpha: 1)
   }
 

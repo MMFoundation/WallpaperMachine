@@ -12245,6 +12245,11 @@ public enum BridgeScalingMode {
      * darkened copy of the same picture.
      */
     case matchBlurred
+    /**
+     * `Fill`'s picture, with any room left when scaled down filled by a
+     * blurred, darkened copy of the same picture.
+     */
+    case fillBlurred
 }
 
 
@@ -12267,6 +12272,8 @@ public struct FfiConverterTypeBridgeScalingMode: FfiConverterRustBuffer {
         case 4: return .fill
 
         case 5: return .matchBlurred
+
+        case 6: return .fillBlurred
 
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -12294,6 +12301,10 @@ public struct FfiConverterTypeBridgeScalingMode: FfiConverterRustBuffer {
 
         case .matchBlurred:
             writeInt(&buf, Int32(5))
+
+
+        case .fillBlurred:
+            writeInt(&buf, Int32(6))
 
         }
     }

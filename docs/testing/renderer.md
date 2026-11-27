@@ -870,10 +870,12 @@ alike, non-finite values fall back to the centre and out-of-range ones clamp, an
 pointer mapping follows the position.
 
 `backdrop_geometry_test` (CPU only, in the check) pins the arithmetic of Fit with blurred
-backdrop: for several shapes (16:9 on an ultrawide, on 16:10, on a portrait display, the
-same shape, a one-pixel rounding gap) the layout's rectangle is Fit's for every factor,
+backdrop (`FIT_BLURRED`, 4) and Fill with blurred backdrop (`FILL_BLURRED`, 5): for
+several shapes (16:9 on an ultrawide, on 16:10, on a portrait display, the same shape, a
+one-pixel rounding gap) each mode's layout rectangle matches Fit or Fill for every factor,
 position and display scale, `backdrop_px` is Fill at a factor of 1, centred, and `backdrop`
-is true exactly when the picture leaves more than a pixel of room; every other mode reports
+is true exactly when the picture leaves more than a pixel of room (`FILL_BLURRED` leaves no
+room at or above factor 1 and leaves room once scaled down); every other mode reports
 none and keeps its rectangle; a mode value past the last is refused. The bands cover the
 display minus the picture exactly (checked by area and by sampled points) without
 overlapping the picture or each other, including a picture moved past an edge, larger than
@@ -882,7 +884,8 @@ an 8-bit 480x270 image) and one for 1000 texels, always ends 128 texels on the l
 and keeps its taps at most four texels apart.
 
 `backdrop_scene_test` (native Metal, headless, in the check) runs a canvas-filling gradient
-through the scene harness as Fit and as Fit with blurred backdrop, with bars left and
+through the scene harness as Fit and Fit with blurred backdrop, and as Fill and Fill with
+blurred backdrop (at factor 1 and scaled down), with bars left and
 right, above and below, mirrored, and for a picture longer than 1024 texels: the picture
 is Fit's byte for byte, Fit's bars are black, the copy's are not, neighbouring pixels of
 the copy differ by at most four steps, the copy equals the gradient Fill-sized at 70% of

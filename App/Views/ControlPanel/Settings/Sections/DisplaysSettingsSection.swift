@@ -230,7 +230,10 @@ struct DisplaysSettingsSection: View {
     keywords: ["Choose a wallpaper to adjust playback."])
   static let scaling = SettingsItem(
     id: "displays.scaling", section: .displays, inside: playback, title: "Scaling",
-    keywords: ["No scaling", "Stretch", "Match", "Fill"])
+    keywords: [
+      "No scaling", "Stretch", "Match", "Match with blurred backdrop", "Fill",
+      "Fill with blurred backdrop",
+    ])
   static let scale = SettingsItem(
     id: "displays.scale", section: .displays, inside: playback, title: "Scale",
     note:

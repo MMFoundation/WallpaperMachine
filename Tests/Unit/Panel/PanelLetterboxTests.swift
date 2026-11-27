@@ -284,6 +284,13 @@ final class PanelLetterboxTests: PanelTestCase {
       // 23 of 180 rows a side leaves 134 rows: 180 / 134 = 1.3433, plus half a percent is 1.35.
       XCTAssertEqual(card.suggestion, .factor(1.35))
       XCTAssertEqual(state.scalingFactor, 1.25)
+
+      fixture.store.wallpaperOptionsSnapshot = BridgeSnapshotFixtures.options(
+        wallpaperId: "one", kind: .video, displayConfigurations: [fixture.configuration(mode: .fillBlurred, factor: 1)])
+      state = try fixture.card()
+      card = try barsCard(state)
+      XCTAssertEqual(card.suggestion, .factor(1.35), "Fill with blurred backdrop uses Fill's crop")
+      XCTAssertTrue(card.stage.isAvailable)
     }
   }
 

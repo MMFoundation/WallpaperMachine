@@ -416,7 +416,7 @@ final class NativeVideoPlayer {
 
     /// Whether `mode` leaves room around the picture that the border colour fills.
     nonisolated static func borderShows(for mode: BridgeScalingMode) -> Bool {
-        mode != .fill && mode != .stretch
+        mode != .fill && mode != .fillBlurred && mode != .stretch
     }
 
     /// Places the layer by bounds and position rather than `frame`, which is undefined once

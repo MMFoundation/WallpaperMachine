@@ -968,7 +968,7 @@ wallpaper** help names it too. Disabled and mirrored displays are listed but not
 can no longer be chosen stays stored (the menu bar and automation read it) and the menu reads
 **Target display** until another is picked.
 Per-display enablement, independent/mirror mode, mirror source, scaling (No scaling,
-Stretch, Match, Match with blurred backdrop, Fill), **Scale** (combining the 10%–100%
+Stretch, Match, Match with blurred backdrop, Fill, Fill with blurred backdrop), **Scale** (combining the 10%–100%
 percentage slider with the numeric scale-factor field, preserving `> 1.0` zoom-in
 cropping values, see
 [wallpaper properties](wallpaper-properties.md)), frame rate, mute and

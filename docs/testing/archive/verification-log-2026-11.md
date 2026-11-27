@@ -9,6 +9,14 @@ level.
 These are historical results about the trees they were taken on. They are not
 evidence about the current tree and must never be cited as such.
 
+## 2026-11-25 — Wave 2A UI/UX workflow upgrades (#8, #9, #10, #11, #16)
+
+- Scope: three-page clickable tags, ActiveFilterChipsBar, Workshop Hide installed (#8); Collections scope menu, quick actions, target display wallpaper titles, inline playlist controls (#9); Inspector search/modified/collapsible headings, artwork Preview, Preview shortcuts/Apply (#10); Menu Bar dynamic scroll/compact picker/Mute All/playlist badge/reveal (#11); Shift+Arrow, Cmd+S, Placement pinch/Option+scroll/double-click/center guides, Preset Update & Apply & Save (#16).
+- Routine gate: python3 scripts/test.py — PASS (36/36 Python suites OK; 5251 passed, 0 failed, 70 skipped of 5321 native tests in 161s).
+- Localization: App/Resources/Localizable.xcstrings +37/-1 keys across all 6 shipped languages (en, ja, ko, pt-BR, zh-Hans, zh-Hant), verified by test_localization_catalogs.py and test_panel_localization.py.
+- Review: verifier-w2a read-only review PASS (0 blockers after fixing 3 must-fix and 3 nit findings with added unit tests).
+- Not run: Release build (not requested), --ui desktop tests, and live visual inspection.
+
 ## 2026-11-25 — Wave 1 P0 fixes and quick wins (#1-#7)
 
 - Scope: NowPlaying theme/day-night, empty Favorites/narrowingFilterCount/collectionID, a11y/focus/cursor/SelectButton, thermal hysteresis/battery renderScale/Web middle-click+language, Workshop updates/comments/UpdateWindow, Widgets multi-display preview+Copy Style+Cmd-D, Switch Transitions, Lock Screen renderScale.

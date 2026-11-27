@@ -155,7 +155,7 @@ enum InspectorPolicy {
   /// wallpapers. A web page always fills its window, so a slider for shrinking it would do nothing.
   static func offersScalePercentage(_ options: InspectorOptions) -> Bool { options.offersPosition }
 
-  // MARK: Fit with blurred backdrop
+  // MARK: Blurred backdrop scaling modes
 
   /// Fit with blurred backdrop is offered where the scaling mode moves a picture: scene and video wallpapers. A
   /// web page always fills its window. A display already set to it keeps it in the menu.
@@ -165,17 +165,25 @@ enum InspectorPolicy {
     options.offersPosition || display.scalingMode == .matchBlurred
   }
 
-  /// What is said under Fit with blurred backdrop.
+  /// Fill with blurred backdrop is offered where the scaling mode moves a picture: scene and video wallpapers.
+  /// A web page always fills its window. A display already set to it keeps it in the menu.
+  static func offersBlurredFill(_ options: InspectorOptions, display: InspectorOptions.DisplayRow)
+    -> Bool
+  {
+    options.offersPosition || display.scalingMode == .fillBlurred
+  }
+
+  /// What is said under a blurred backdrop scaling mode.
   enum BlurredFitNote: Equatable {
-    /// The native video player draws this display and has no blurred fill: its bars stay black,
-    /// with **Open Performance** to choose Compatibility instead.
+    /// The native video player draws this display and has no blurred fill: its bars stay black.
     case nativePlayer
     /// Nothing: the blurred fill is drawn, or the mode is another one.
     case none
   }
 
   static func blurredFitNote(for display: InspectorOptions.DisplayRow) -> BlurredFitNote {
-    display.scalingMode == .matchBlurred && display.isDrawnByNativePlayer ? .nativePlayer : .none
+    let blurred = display.scalingMode == .matchBlurred || display.scalingMode == .fillBlurred
+    return blurred && display.isDrawnByNativePlayer ? .nativePlayer : .none
   }
 
   // MARK: Apply changes

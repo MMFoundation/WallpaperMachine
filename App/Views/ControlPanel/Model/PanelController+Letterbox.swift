@@ -101,8 +101,10 @@ extension PanelController {
       case .bars(let bars):
         var suggestion: LetterboxState.Suggestion?
         var suggested: Double?
-        // Fill is the only mode in which a scale factor crops the bars off the display.
-        if context.scalingMode == .fill, let viewport = letterbox.viewportProvider(displayID) {
+        // Fill (including Fill with blurred backdrop) is the mode in which a scale factor crops the bars off the display.
+        if context.scalingMode == .fill || context.scalingMode == .fillBlurred,
+          let viewport = letterbox.viewportProvider(displayID)
+        {
           switch LetterboxZoom.outcome(bars: bars, aspect: report.aspect, viewport: viewport) {
           case .alreadyHidden: suggestion = .alreadyHidden
           case .factor(let factor):
@@ -187,7 +189,8 @@ extension PanelController {
   /// not matter.
   private func stagedLetterboxFactor(id: String, displayID: String) throws -> LetterboxStage {
     guard let context = letterboxContext(), context.wallpaperID == id,
-      context.displayID == displayID, context.eligible, context.scalingMode == .fill,
+      context.displayID == displayID, context.eligible,
+      context.scalingMode == .fill || context.scalingMode == .fillBlurred,
       case .done(let report) = letterbox.phase(for: id, revision: store.libraryRefreshRevision),
       case .bars(let bars) = report.verdict,
       let viewport = letterbox.viewportProvider(displayID),

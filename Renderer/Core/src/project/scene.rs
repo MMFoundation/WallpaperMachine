@@ -242,6 +242,9 @@ pub enum ScalingMode {
     /// `Fit`'s picture, with the room around it filled by a blurred, darkened
     /// copy of the same picture.
     FitBlurred,
+    /// `Fill`'s picture, with any room left when scaled down filled by a
+    /// blurred, darkened copy of the same picture.
+    FillBlurred,
 }
 
 impl Display for ScalingMode {
@@ -252,6 +255,7 @@ impl Display for ScalingMode {
             Self::Fit => "fit",
             Self::Fill => "fill",
             Self::FitBlurred => "fit_blurred",
+            Self::FillBlurred => "fill_blurred",
         })
     }
 }

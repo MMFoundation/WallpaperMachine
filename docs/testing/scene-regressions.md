@@ -2803,7 +2803,7 @@ texture entrances are not decoded-image or native-rendering evidence.
   the framed scene through the poster path against the same scene drawn whole
   (`SetSdrFramingOverrideForTests` forces either): Fill with and without bloom (only
   bloom's reach across the window's edge differs), an odd crop offset, Stretch, Fit,
-  Fit with blurred backdrop and original size sizing the targets again before their
+  Fit with blurred backdrop, Fill with blurred backdrop and original size sizing the targets again before their
   first draw, and zoom, pan and flip moving the window, sizing it at most once.
   `.IsOffByDefaultAndARunningSceneTakesTheSettingAtItsNextFrame` keeps the setting off
   until it is turned on, frames a running scene at its next frame, and turned off again
@@ -2952,14 +2952,15 @@ texture entrances are not decoded-image or native-rendering evidence.
   the animation never reaches the next frame. `sprite_animation_test` checks
   elapsed time across cadences and long loops.
 
-- **Fit with blurred backdrop** — `backdrop_geometry_test` and `backdrop_scene_test`. The
-  mode's picture, position, scale factor and pointer mapping are Fit's; the room around
-  it holds a darker, blurred copy of the same live picture, drawn only into the bands
-  the picture leaves, so the picture's bytes are Fit's. The copy exists only while a
-  composition has room for it (a one-pixel gap is none), costs no extra scene pass,
-  and moves neither with the picture's position nor with its scale factor. A frame that
-  repeats the picture repeats the copy and is skipped; the key that decides it must
-  keep its capacity.
+- **Blurred backdrop scaling modes (Fit and Fill)** — `backdrop_geometry_test` and
+  `backdrop_scene_test`. `FIT_BLURRED` (4) and `FILL_BLURRED` (5) match Fit's or Fill's
+  picture, position, scale factor and pointer mapping; any room around the picture (always
+  absent for `FILL_BLURRED` at scale >= 1, opened when scaled down below 1) holds a darker,
+  blurred copy of the same live picture, drawn only into the bands the picture leaves, so
+  the picture's bytes match Fit or Fill. The copy exists only while a composition has room
+  for it (a one-pixel gap is none), costs no extra scene pass, and moves neither with the
+  picture's position nor with its scale factor. A frame that repeats the picture repeats
+  the copy and is skipped; the key that decides it must keep its capacity.
 - **An alias slot reads transparent black outside its target** —
   `MetalSceneDraw.AnAliasSlotReadsTransparentBlackOutsideItsTarget`. A material slot that
   names an `_alias_*` texture (Wallpaper Engine has one, `_alias_lightCookie`) samples its

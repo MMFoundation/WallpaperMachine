@@ -60,7 +60,7 @@ POSTER_TEST = "MetalSceneDraw.LocalProjectsDrawAPosterPicture"
 LOCAL_TEST = "MetalSceneDraw.LocalProjectsNamedByTheEnvironmentRunThroughTheNativeBackend"
 BUNDLE_PREFIX = "dev.wallpapermachine.perfbench"
 PRODUCTION_SURFACES = "3840x2160@2+3456x2234@2"
-SCALING_MODES = ("none", "stretch", "fit", "fill", "fit_blurred")
+SCALING_MODES = ("none", "stretch", "fit", "fill", "fit_blurred", "fill_blurred")
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,39}")
 ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*")
 HASH_LINE = re.compile(r"^\[ HASH     \] (\S+) (\d+)x(\d+) frame=(\d+) sha256=([0-9a-f]{64})$", re.MULTILINE)

@@ -16929,6 +16929,7 @@ WallpaperScalingMode CompareScalingFromEnvironment(
         { "fit", WallpaperScalingMode::FIT },
         { "fill", WallpaperScalingMode::FILL },
         { "fit_blurred", WallpaperScalingMode::FIT_BLURRED },
+        { "fill_blurred", WallpaperScalingMode::FILL_BLURRED },
     };
     const auto found = modes.find(text);
     if (found == modes.end()) {

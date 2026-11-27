@@ -334,7 +334,7 @@ bool MetalBackdrop::encodeMaking(id<MTLCommandBuffer> command, id<MTLTexture> so
     if (!built_ || command == nil || source == nil) return false;
     if (!makeImages((uint32_t)source.width, (uint32_t)source.height)) return false;
 
-    [command pushDebugGroup:@"Fit with blurred backdrop"];
+    [command pushDebugGroup:@"Blurred backdrop"];
     id<MTLTexture> from = source;
     for (std::size_t i = 0; i < plan_.size(); ++i) {
         const auto& step = plan_[i];
@@ -392,7 +392,7 @@ void MetalBackdrop::encodeBands(id<MTLRenderCommandEncoder> encoder, const Surro
 {
     if (!built_ || chain_.empty() || bands.count <= 0) return;
     id<MTLTexture> small = chain_.back();
-    [encoder pushDebugGroup:@"Fit with blurred backdrop: bands"];
+    [encoder pushDebugGroup:@"Blurred backdrop: bands"];
     [encoder setViewport:viewport];
     [encoder setRenderPipelineState:stretch_];
     [encoder setFragmentTexture:small atIndex:0];

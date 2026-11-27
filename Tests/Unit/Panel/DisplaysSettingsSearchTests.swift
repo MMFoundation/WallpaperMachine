@@ -98,6 +98,12 @@ final class DisplaysSettingsSearchTests: SettingsBTestCase {
     let smart = card("Must have tags", rows: DisplaysCardSearch.Rows(playlistMode: .rotate, isSmart: true))
     XCTAssertTrue(smart.showsCard)
     XCTAssertTrue(smart.opens(S.playlist))
+
+    let blurred = card("Fill with blurred backdrop", rows: mirror)
+    XCTAssertTrue(blurred.showsCard)
+    XCTAssertTrue(blurred.showsDisclosure(S.playback))
+    XCTAssertTrue(blurred.opens(S.playback))
+    XCTAssertTrue(search("blurred").matchesItself(S.scaling))
     XCTAssertFalse(card("Must have tags", rows: DisplaysCardSearch.Rows(playlistMode: .rotate)).showsCard)
 
     let weighted = card("Prefer higher-rated", rows: DisplaysCardSearch.Rows(playlistMode: .rotate, isShuffle: true))

@@ -195,6 +195,7 @@ struct DisplaysPlaybackDisclosure: View {
             case .match: L("Match")
             case .fill: L("Fill")
             case .matchBlurred: L("Match with blurred backdrop")
+            case .fillBlurred: L("Fill with blurred backdrop")
             }
           }(), width: 210
         ) {
@@ -203,6 +204,7 @@ struct DisplaysPlaybackDisclosure: View {
           Text("Match").tag(BridgeScalingMode.match)
           Text("Match with blurred backdrop").tag(BridgeScalingMode.matchBlurred)
           Text("Fill").tag(BridgeScalingMode.fill)
+          Text("Fill with blurred backdrop").tag(BridgeScalingMode.fillBlurred)
         }
         .disabled(playbackOff)
       }

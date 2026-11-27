@@ -109,6 +109,7 @@ extension BridgeScalingMode {
         case .match: 2
         case .fill: 3
         case .matchBlurred: 4
+        case .fillBlurred: 5
         }
     }
 }

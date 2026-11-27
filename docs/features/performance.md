@@ -1231,8 +1231,9 @@ change nothing is observed.
 
 Playback honours the wallpaper's scaling mode and scale factor by the renderer's own
 layout rule, so a clip sits where the scene engine used to put it: **Fill**,
-**Fit** and **Stretch** scale it to the display, **Fit with blurred backdrop** places
-it as Fit but keeps Fit's black bars, because the native player has no blurred fill
+**Fit** and **Stretch** scale it to the display, **Fit with blurred backdrop** and
+**Fill with blurred backdrop** place it as Fit or Fill respectively and keep black bars
+where the picture leaves room, because the native player has no blurred fill
 (the inspector says so; a mirror of a natively played display gets the same bars and
 no note), **Original size** shows one video
 pixel per point (a 1920x1080 clip covers 1920x1080 points of a Retina display, not
@@ -1476,8 +1477,8 @@ It applies only to an SDR scene at Display resolution with a zoom of 1 or more, 
 Fill or Original size, and only when the scene is not upscaled by
 [MetalFX](#metalfx-upscaling): MetalFX would upscale the visible part on another grid
 than the whole layout's, and its filter reads across that part's edge, so a scene it
-upscales keeps drawing its whole layout. Fit, Stretch and Fit with blurred backdrop
-show the whole canvas and are untouched; an HDR scene is already drawn over the
+upscales keeps drawing its whole layout. Fit, Stretch, Fit with blurred backdrop and Fill
+with blurred backdrop keep drawing the whole canvas and are untouched; an HDR scene is already drawn over the
 display's own rectangle. A scene whose layout cannot be cut on the grid of its
 screen-sized buffers (a quarter-size bloom buffer needs cuts at multiples of 4; a
 mip-mapped one, or a layout that is not a multiple of that grid, cannot be cut) is

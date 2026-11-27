@@ -222,6 +222,9 @@ struct DisplayCard: View {
             Text("Fit with blurred backdrop").tag(BridgeScalingMode.matchBlurred)
           }
           Text("Fill").tag(BridgeScalingMode.fill)
+          if InspectorPolicy.offersBlurredFill(options, display: display) {
+            Text("Fill with blurred backdrop").tag(BridgeScalingMode.fillBlurred)
+          }
         }
         .labelsHidden()
         .pickerStyle(.menu)
@@ -234,15 +237,9 @@ struct DisplayCard: View {
       .disabled(controller.isInspectorControlDisabled(options, key: modeKey))
       if InspectorPolicy.blurredFitNote(for: display) == .nativePlayer {
         InspectorCardRow {
-          VStack(alignment: .leading, spacing: 4) {
-            InspectorNote(
-              "This video is drawn by the native video player, which leaves the bars black. Choose Compatibility for Video playback in Performance settings to blur them."
-            )
-            Button("Open Performance") {
-              controller.launch("openSettings") { try await controller.openSettings(.performance) }
-            }
-            .buttonStyle(.panelCardLink)
-          }
+          InspectorNote(
+            "This video is drawn by the native video player, which leaves the bars black."
+          )
         }
       }
       ScaleFactorRow(options: options, display: display)

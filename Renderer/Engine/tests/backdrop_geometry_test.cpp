@@ -62,16 +62,22 @@ PixelRect Clip(const PixelRect& a, const PixelRect& b)
 
 // ---- the scaling mode and its layout -----------------------------------------------------
 
-TEST(BackdropLayout, TheModeHasValueFourAndNothingPastTheLastIsAMode)
+TEST(BackdropLayout, TheBlurredModesHaveValuesFourAndFiveAndNothingPastTheLastIsAMode)
 {
     ASSERT_TRUE(WallpaperScalingModeFromValue(4).has_value());
     EXPECT_EQ(*WallpaperScalingModeFromValue(4), WallpaperScalingMode::FIT_BLURRED);
     EXPECT_EQ(static_cast<int>(WallpaperScalingMode::FIT_BLURRED), 4);
+    ASSERT_TRUE(WallpaperScalingModeFromValue(5).has_value());
+    EXPECT_EQ(*WallpaperScalingModeFromValue(5), WallpaperScalingMode::FILL_BLURRED);
+    EXPECT_EQ(static_cast<int>(WallpaperScalingMode::FILL_BLURRED), 5);
+    EXPECT_TRUE(WallpaperScalingModeHasBlurredBackdrop(WallpaperScalingMode::FIT_BLURRED));
+    EXPECT_TRUE(WallpaperScalingModeHasBlurredBackdrop(WallpaperScalingMode::FILL_BLURRED));
     for (int64_t value = 0; value <= 3; ++value) {
         ASSERT_TRUE(WallpaperScalingModeFromValue(value).has_value()) << value;
         EXPECT_EQ(static_cast<int64_t>(*WallpaperScalingModeFromValue(value)), value);
+        EXPECT_FALSE(WallpaperScalingModeHasBlurredBackdrop(*WallpaperScalingModeFromValue(value)));
     }
-    for (const int64_t value : { int64_t(5), int64_t(6), int64_t(255), int64_t(256), int64_t(-1),
+    for (const int64_t value : { int64_t(6), int64_t(7), int64_t(255), int64_t(256), int64_t(-1),
                                  int64_t(1) << 40 }) {
         EXPECT_FALSE(WallpaperScalingModeFromValue(value).has_value()) << value;
     }
@@ -99,17 +105,42 @@ TEST(BackdropLayout, FitWithBackdropIsFitWhateverTheFactorAndPosition)
     }
 }
 
-TEST(BackdropLayout, TheBackdropIsFillAtFactorOneCentredWhereverThePictureIs)
+TEST(BackdropLayout, FillWithBackdropIsFillWhateverTheFactorAndPosition)
 {
     for (const Shape& shape : kShapes) {
         for (const double dpr : { 1.0, 2.0 }) {
-            const auto fill = Layout(WallpaperScalingMode::FILL, shape, dpr, 1.0);
-            for (const double factor : { 0.5, 1.0, 1.3 }) {
+            for (const double factor : { 0.5, 0.8, 1.0, 1.3 }) {
                 for (const double pan_x : { 0.0, 0.5, 1.0 }) {
-                    for (const double pan_y : { 0.0, 1.0 }) {
-                        const auto blur = Layout(WallpaperScalingMode::FIT_BLURRED, shape, dpr, factor, pan_x, pan_y);
-                        EXPECT_TRUE(SameRect(blur.backdrop_px, fill.viewport_px))
-                            << shape.name << " dpr " << dpr << " factor " << factor << " pan " << pan_x << "," << pan_y;
+                    for (const double pan_y : { 0.0, 0.5, 1.0 }) {
+                        const auto fill = Layout(WallpaperScalingMode::FILL, shape, dpr, factor, pan_x, pan_y);
+                        const auto blur = Layout(WallpaperScalingMode::FILL_BLURRED, shape, dpr, factor, pan_x, pan_y);
+                        const std::string where = std::string(shape.name) + " dpr " + std::to_string(dpr) +
+                                                  " factor " + std::to_string(factor);
+                        EXPECT_TRUE(SameRect(fill.viewport_px, blur.viewport_px)) << where;
+                        EXPECT_TRUE(SameRect(fill.scissor_px, blur.scissor_px)) << where;
+                        EXPECT_EQ(fill.scale_x, blur.scale_x) << where;
+                        EXPECT_EQ(fill.scale_y, blur.scale_y) << where;
+                    }
+                }
+            }
+        }
+    }
+}
+
+TEST(BackdropLayout, TheBackdropIsFillAtFactorOneCentredWhereverThePictureIs)
+{
+    for (const auto mode : { WallpaperScalingMode::FIT_BLURRED, WallpaperScalingMode::FILL_BLURRED }) {
+        for (const Shape& shape : kShapes) {
+            for (const double dpr : { 1.0, 2.0 }) {
+                const auto fill = Layout(WallpaperScalingMode::FILL, shape, dpr, 1.0);
+                for (const double factor : { 0.5, 0.8, 1.0, 1.3 }) {
+                    for (const double pan_x : { 0.0, 0.5, 1.0 }) {
+                        for (const double pan_y : { 0.0, 1.0 }) {
+                            const auto blur = Layout(mode, shape, dpr, factor, pan_x, pan_y);
+                            EXPECT_TRUE(SameRect(blur.backdrop_px, fill.viewport_px))
+                                << static_cast<int>(mode) << " " << shape.name << " dpr " << dpr
+                                << " factor " << factor << " pan " << pan_x << "," << pan_y;
+                        }
                     }
                 }
             }
@@ -132,6 +163,17 @@ TEST(BackdropLayout, TheBackdropIsOnlyWantedWhenThePictureLeavesMoreThanAPixelOf
     // Room on one axis is enough: at 1.2 the picture is taller than the 1080 px display and
     // still narrower than its 2560 px.
     EXPECT_TRUE(Layout(WallpaperScalingMode::FIT_BLURRED, kShapes[0], 1.0, 1.2).backdrop);
+
+    // Fill with blurred backdrop leaves no room at or above factor 1 for any display shape,
+    // and wants a backdrop once scaled down far enough to leave more than a pixel on either axis.
+    for (const Shape& shape : kShapes) {
+        EXPECT_FALSE(Layout(WallpaperScalingMode::FILL_BLURRED, shape, 1.0, 1.0).backdrop) << shape.name;
+        EXPECT_FALSE(Layout(WallpaperScalingMode::FILL_BLURRED, shape, 1.0, 1.5).backdrop) << shape.name;
+        EXPECT_TRUE(Layout(WallpaperScalingMode::FILL_BLURRED, shape, 1.0, 0.5).backdrop) << shape.name;
+    }
+    // Ultrawide at factor 0.8: width shrinks from 2560 to 2048 (room on left/right) while height
+    // is still 1152 > 1080. Room on one axis is enough.
+    EXPECT_TRUE(Layout(WallpaperScalingMode::FILL_BLURRED, kShapes[0], 1.0, 0.8).backdrop);
 }
 
 TEST(BackdropLayout, EveryOtherModeHasNoBackdropAndItsLayoutIsAsItWas)

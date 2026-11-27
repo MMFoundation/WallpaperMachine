@@ -85,8 +85,14 @@ final class PanelWallpaperSettingsTests: PanelTestCase {
       XCTAssertFalse(options.isDirty, "a scaling mode is saved at once, not drafted")
       for display in options.displays {
         XCTAssertTrue(InspectorPolicy.offersBlurredFit(options, display: display))
+        XCTAssertTrue(InspectorPolicy.offersBlurredFill(options, display: display))
         XCTAssertEqual(InspectorPolicy.blurredFitNote(for: display), .none)
       }
+
+      try await controller.setScalingMode(.fillBlurred, on: "primary", for: "wp")
+      XCTAssertEqual(bridge.calls.last, "scalingMode wp primary fillBlurred")
+      let updated = try XCTUnwrap(controller.inspectorOptions(for: "wp"))
+      XCTAssertEqual(updated.displays.map(\.scalingMode), [.fillBlurred, .matchBlurred])
     }
   }
 
@@ -290,6 +296,7 @@ extension BridgeScalingMode {
     case .match: "match"
     case .fill: "fill"
     case .matchBlurred: "matchBlurred"
+    case .fillBlurred: "fillBlurred"
     }
   }
 }

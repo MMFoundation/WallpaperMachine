@@ -1369,8 +1369,8 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
                              static_cast<uint16_t>(number("WE_TEST_ENERGY_HEIGHT", 1080)),
                              number("WE_TEST_ENERGY_SCALE_FACTOR", 1.0), "default" });
     }
-    // The scaling mode the host pushes on each surface: `fill`, `fit`,
-    // `fit_blurred`, `stretch` or `none`, one for all or one per surface. Unset,
+    // The scaling mode the host pushes on each surface: `fill`, `fill_blurred`,
+    // `fit`, `fit_blurred`, `stretch` or `none`, one for all or one per surface. Unset,
     // none is pushed and the scene keeps its own.
     const std::string scaling_list = std::getenv("WE_TEST_ENERGY_SCALING") != nullptr
                                          ? std::getenv("WE_TEST_ENERGY_SCALING")
@@ -1381,6 +1381,7 @@ TEST_F(UnchangedPresent, LocalProjectEnergyIsMeasuredHeadlessly)
         { "fit", WallpaperScalingMode::FIT },
         { "fill", WallpaperScalingMode::FILL },
         { "fit_blurred", WallpaperScalingMode::FIT_BLURRED },
+        { "fill_blurred", WallpaperScalingMode::FILL_BLURRED },
     };
     const auto scalings = SplitList(scaling_list);
     ASSERT_TRUE(scalings.size() == 1 || scalings.size() == surfaces.size())

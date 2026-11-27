@@ -5055,8 +5055,8 @@
     "Limited to %lld fps on battery" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Limitado a %lld fps na bateria"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "배터리 사용 중 %lld fps로 제한됨"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "バッテリー駆動中のため%lld fpsに制限されています"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "使用电池时限制为 %lld fps"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "使用電池時限制為 %lld fps"}}}
     },
-    "This video is drawn by the native video player, which leaves the bars black. Choose Compatibility for Video playback in Performance settings to blur them." : {
-      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Este vídeo é desenhado pelo reprodutor de vídeo nativo, que deixa as barras pretas. Escolha Compatibilidade em Reprodução de vídeo nos ajustes de Desempenho para desfocá-las."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 동영상은 네이티브 동영상 플레이어로 표시되므로 여백이 검은색으로 남습니다. 여백을 흐리게 채우려면 성능 설정의 ‘동영상 재생’에서 ‘호환성’을 선택하세요."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオはネイティブのビデオプレーヤーで描画されるため、余白は黒のままです。余白をぼかすには、パフォーマンス設定の「ビデオ再生」で「互換モード」を選んでください。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此视频由原生视频播放器绘制，空白处保持黑色。要用模糊画面填充，请在“性能”设置中将“视频播放”选为“兼容模式”。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此影片由原生影片播放器繪製，空白處維持黑色。若要以模糊畫面填滿，請在「效能」設定中將「影片播放」選為「相容模式」。"}}}
+    "This video is drawn by the native video player, which leaves the bars black." : {
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Este vídeo é desenhado pelo reprodutor de vídeo nativo, que deixa as barras pretas."}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "이 동영상은 네이티브 동영상 플레이어로 표시되므로 여백이 검은색으로 남습니다."}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "このビデオはネイティブのビデオプレーヤーで描画されるため、余白は黒のままです。"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "此视频由原生视频播放器绘制，空白处保持黑色。"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "此影片由原生影片播放器繪製，空白處維持黑色。"}}}
     },
     "Open Performance" : {
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Abrir Desempenho"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "성능 설정 열기"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "パフォーマンス設定を開く"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "打开性能设置"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "開啟效能設定"}}}
@@ -6071,6 +6071,10 @@
     "Fill, keep the top" : {
       "extractionState" : "manual",
       "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Preencher, manter o topo"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "채우기, 상단 유지"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "画面全体に表示（上部を維持）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "填充（保留顶部）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "填滿（保留頂部）"}}}
+    },
+    "Fill with blurred backdrop" : {
+      "extractionState" : "manual",
+      "localizations" : {"pt-BR" : {"stringUnit" : {"state" : "translated", "value" : "Preencher com fundo desfocado"}}, "ko" : {"stringUnit" : {"state" : "translated", "value" : "채우기, 흐린 배경"}}, "ja" : {"stringUnit" : {"state" : "translated", "value" : "画面いっぱいに表示（背景をぼかす）"}}, "zh-Hans" : {"stringUnit" : {"state" : "translated", "value" : "填充（模糊背景）"}}, "zh-Hant" : {"stringUnit" : {"state" : "translated", "value" : "填滿（模糊背景）"}}}
     },
     "Fit with blurred backdrop" : {
       "extractionState" : "manual",

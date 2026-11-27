@@ -2615,7 +2615,7 @@ struct MetalRender::Impl
     /// original-size or scaled-down picture show: the scene's scheme colour, except under
     /// the blurred backdrop, which keeps black.
     std::array<float, 3> BorderColorFor(const Scene& scene) const {
-        if (scaling_mode == WallpaperScalingMode::FIT_BLURRED) return { 0.0f, 0.0f, 0.0f };
+        if (WallpaperScalingModeHasBlurredBackdrop(scaling_mode)) return { 0.0f, 0.0f, 0.0f };
         return scene.border_color;
     }
     /// Builds what the scaling mode needs for the blurred backdrop, or lets go of it when the
@@ -3056,7 +3056,7 @@ void MetalRender::Impl::releasePresentation()
 
 void MetalRender::Impl::prepareBackdrop()
 {
-    if (scaling_mode != WallpaperScalingMode::FIT_BLURRED) {
+    if (! WallpaperScalingModeHasBlurredBackdrop(scaling_mode)) {
         backdrop.release();
         syncAuxRenderTargetBytes();
         return;
@@ -3278,7 +3278,7 @@ bool MetalRender::Impl::encodeComposition(id<MTLCommandBuffer> command,
     // The copy for the bars is made first, so the composition below can read it. It exists
     // while a composition has room to fill: the first frame that has none lets it go.
     bool draw_backdrop = false;
-    if (scaling_mode == WallpaperScalingMode::FIT_BLURRED) {
+    if (WallpaperScalingModeHasBlurredBackdrop(scaling_mode)) {
         if (layout.backdrop) {
             draw_backdrop = backdrop.buildPipelines(device, destination.pixelFormat, scene.output_linear) &&
                             backdrop.encodeMaking(command, output->second);
@@ -7588,19 +7588,19 @@ WallpaperScalingLayout MetalRender::Impl::scalingLayout(const Scene& scene, uint
 bool MetalRender::Impl::usesDisplayFraming(const Scene& scene) const
 {
     return scene.hdr && !scene.display_sized && scene.resolution == SceneResolution::Display &&
-           scaling_mode != WallpaperScalingMode::FIT_BLURRED;
+           ! WallpaperScalingModeHasBlurredBackdrop(scaling_mode);
 }
 
 bool MetalRender::Impl::sdrRasterWindowApplies(const Scene& scene) const
 {
-    // Fit with the blurred backdrop samples the whole raster for its bands. A zoom below 1
+    // A blurred backdrop samples the whole raster for its bands. A zoom below 1
     // shows more of the canvas with every step, so it keeps the whole raster rather than
     // sizing the targets again on each one. MetalFX would upscale the window on another grid
     // than the whole raster's, and its filter reads across the window's edge: an upscaled
     // scene keeps the whole raster too.
     return sdr_window_enabled && ! scene.hdr && ! scene.display_sized &&
            scene.resolution == SceneResolution::Display &&
-           scaling_mode != WallpaperScalingMode::FIT_BLURRED && scaling_factor >= 1.0 &&
+           ! WallpaperScalingModeHasBlurredBackdrop(scaling_mode) && scaling_factor >= 1.0 &&
            ! (MetalUpscalingEnabled() && render::ResolveSceneRenderScale(scene) < 1.0) &&
            output_width > 0 && output_height > 0;
 }

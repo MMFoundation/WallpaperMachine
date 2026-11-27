@@ -56,6 +56,7 @@ final class WallpaperPreviewRequestTests: XCTestCase {
     func testEveryScalingModeReachesTheRendererAsItsOwnNumber() throws {
         let expected: [(BridgeScalingMode, Int32)] = [
             (.none, 0), (.stretch, 1), (.match, 2), (.fill, 3), (.matchBlurred, 4),
+            (.fillBlurred, 5),
         ]
         for (mode, number) in expected {
             XCTAssertEqual(mode.rendererValue, number, "\(mode)")

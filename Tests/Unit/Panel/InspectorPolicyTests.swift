@@ -357,17 +357,21 @@ final class InspectorPolicyTests: InspectorTestCase {
     let configurations = [
       InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .fill, factor: 1, pan: (0.5, 0.5)),
       InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
+      InspectorRenderFixture.config("third", "Built-in (3 - Secondary)", mode: .fillBlurred, factor: 0.8, pan: (0.5, 0.5)),
     ]
     for kind in [BridgeWallpaperKind.projectScene, .video] {
       let options = InspectorOptions.make(
         BridgeSnapshotFixtures.options(wallpaperId: "w", kind: kind, displayConfigurations: configurations))
       XCTAssertEqual(
-        options.displays.map { InspectorPolicy.offersBlurredFit(options, display: $0) }, [true, true], "\(kind)")
+        options.displays.map { InspectorPolicy.offersBlurredFit(options, display: $0) }, [true, true, true], "\(kind)")
+      XCTAssertEqual(
+        options.displays.map { InspectorPolicy.offersBlurredFill(options, display: $0) }, [true, true, true], "\(kind)")
     }
-    // A web page fills its window whatever the mode; a display already set to it keeps it shown.
+    // A web page fills its window whatever the mode; a display already set to a blurred mode keeps it shown.
     let web = InspectorOptions.make(
       BridgeSnapshotFixtures.options(wallpaperId: "w", kind: .webpage, displayConfigurations: configurations))
-    XCTAssertEqual(web.displays.map { InspectorPolicy.offersBlurredFit(web, display: $0) }, [false, true])
+    XCTAssertEqual(web.displays.map { InspectorPolicy.offersBlurredFit(web, display: $0) }, [false, true, false])
+    XCTAssertEqual(web.displays.map { InspectorPolicy.offersBlurredFill(web, display: $0) }, [false, false, true])
   }
 
   func testOnlyANativelyPlayedVideoWithABlurredBackdropIsToldItsBarsStayBlack() {
@@ -377,11 +381,15 @@ final class InspectorPolicyTests: InspectorTestCase {
         InspectorRenderFixture.config("primary", "Studio Display (1 - Primary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
         InspectorRenderFixture.config("second", "LG UltraFine (2 - Secondary)", mode: .matchBlurred, factor: 1, pan: (0.5, 0.5)),
         InspectorRenderFixture.config("third", "Built-in (3 - Secondary)", mode: .match, factor: 1, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("fourth", "Pro Display (4 - Secondary)", mode: .fillBlurred, factor: 0.8, pan: (0.5, 0.5)),
+        InspectorRenderFixture.config("fifth", "Sidecar (5 - Secondary)", mode: .fillBlurred, factor: 0.8, pan: (0.5, 0.5)),
       ])
     var inputs = InspectorOptions.Inputs()
-    inputs.nativePlayerDisplays = [1, 3]
+    inputs.nativePlayerDisplays = [1, 3, 4]
     let displays = InspectorOptions.make(snapshot, inputs: inputs).displays
-    XCTAssertEqual(displays.map(InspectorPolicy.blurredFitNote(for:)), [.nativePlayer, .none, .none])
+    XCTAssertEqual(
+      displays.map(InspectorPolicy.blurredFitNote(for:)),
+      [.nativePlayer, .none, .none, .nativePlayer, .none])
   }
 
   func testAStillTheAppPackagedIsToldByItsIdAndTheArtworkIdIsRead() {

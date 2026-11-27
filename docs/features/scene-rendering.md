@@ -1833,17 +1833,21 @@ or the preview stays in place.
 
 ### Fit with blurred backdrop
 
-`FIT_BLURRED` (the C ABI's scaling mode 4, `fit_blurred` in a display's `monitors` entry,
-`MatchBlurred` across the bridge) lays the picture out exactly as Fit does, position,
-scale factor and pointer mapping included, and fills the room around it with a blurred,
-darker copy of the same live picture instead of the clear colour
-([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). The layout
+`FIT_BLURRED` (C ABI scaling mode 4, `fit_blurred` in a display's `monitors` entry,
+`MatchBlurred` across the bridge) and `FILL_BLURRED` (C ABI scaling mode 5,
+`fill_blurred`, `FillBlurred` across the bridge) lay the picture out exactly as Fit or
+Fill does, position, scale factor and pointer mapping included, and fill any room left
+around it with a blurred, darker copy of the same live picture instead of the clear colour
+([user-facing behaviour](wallpaper-properties.md#fit-with-blurred-backdrop)). Under
+`FILL_BLURRED`, a scale factor of 1 or more covers the display so `layout.backdrop` is
+false and no backdrop images are allocated or drawn; scaling below 1 opens room on one or
+both axes and draws the same backdrop. The layout
 (`ComputeWallpaperScalingLayout`) adds `backdrop_px`, the picture as Fill at a factor of 1
 places it, centred whatever the position, and `backdrop`, whether the picture leaves room:
 a gap of one pixel, the most rounding leaves when the shapes match, is none. The copy is
-drawn only into that room (`ComputeWallpaperBackdropBands`), so the picture's pixels are
-Fit's byte for byte. Both backends build the copy the same way
-(`Presentation/WallpaperBackdrop.hpp`, `MetalWallpaperBackdrop`, `WallpaperBackdropPass`):
+drawn only into that room (`ComputeSurroundBands`), so the picture's pixels are Fit's or
+Fill's byte for byte. Both modes share the same Native Metal backdrop pipeline
+(`Presentation/BackdropGeometry.hpp`, `MetalBackdrop`):
 the scene's output is reduced to an image 128 texels on its longer side, a picture longer
 than 1024 texels first to an eighth of its size in an 8-bit image, with bilinear taps at
 most four texels apart; HDR linear output keeps that first reduction half-float so
@@ -2312,7 +2316,8 @@ does not rasterize a translated projection to the same sub-pixel positions, whic
 leaves single-level differences on a fraction of a percent of pixels at content
 edges in some frames, and more on thin geometry. A cover raster that is not a multiple
 of that grid, a mip-mapped screen-sized target, a capped raster, a zoom below 1, Fit,
-Stretch, original size showing the whole canvas, Fit with blurred backdrop and a scene
+Stretch, original size showing the whole canvas, Fit with blurred backdrop, Fill with
+blurred backdrop and a scene
 MetalFX upscales (render scale below 1 with MetalFX upscaling on: it would upscale the
 window on another grid and its filter reads across the window's edge) draw the whole
 cover raster. The window is sized for a
@@ -2328,7 +2333,8 @@ window (`perf_bench.py identity`).
 at launch. Native HDR Display output
 uses the physical output rectangle: placement and clipping happen before bloom,
 so its edge samples see the same boundary as Wallpaper Engine. Fit with blurred
-backdrop keeps the full canvas-cover raster that the backdrop samples. Canvas size
+backdrop and Fill with blurred backdrop keep the full canvas-cover raster that the
+backdrop samples. Canvas size
 keeps the authored raster. The device's largest texture caps these extents. A
 perspective scene and a plain video do not read this resolution choice.
 
@@ -2341,7 +2347,7 @@ use their existing geometry upload, fixed cards request the existing graph rebui
 A compose layer's card (`composelayer`, such as a project layer over the whole
 canvas) finds the screen position it samples through the framed projection, and its
 texture coordinates only place it in its own buffer, so they are left as they are.
-These updates run at layout events; idle frames add no card scan or relayout. Crossing into or out of Fit with blurred backdrop rebuilds the
+These updates run at layout events; idle frames add no card scan or relayout. Crossing into or out of Fit with blurred backdrop or Fill with blurred backdrop rebuilds the
 raster before the next draw. The change adds no rendering pass or target and usually
 reduces the HDR framebuffer area compared with the canvas-cover raster.
 

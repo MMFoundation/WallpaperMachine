@@ -206,8 +206,8 @@ class SettingsTests(unittest.TestCase):
         self.assertEqual(json.loads(settings["properties"]), {"newproperty": False, "numberoficons": 1.0})
         self.assertEqual(settings["fps"], 60)
         overridden = perf_bench.wallpaper_settings(self.home, "111", self.surfaces, self.displays, config,
-                                                   ["stretch"], 30)
-        self.assertEqual([surface["scaling"] for surface in overridden["surfaces"]], ["stretch", "stretch"])
+                                                   ["fill_blurred"], 30)
+        self.assertEqual([surface["scaling"] for surface in overridden["surfaces"]], ["fill_blurred", "fill_blurred"])
         self.assertEqual(overridden["fps"], 30)
 
     def test_the_first_surface_is_the_primary_display_whichever_displays_are_connected(self):

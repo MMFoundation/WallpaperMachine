@@ -303,7 +303,7 @@ enum InspectorWording {
     case .alreadyHidden?: return L("Fill on this display already crops them out.")
     case .implausible?: return L("The bars look too large to be reliable, so nothing is suggested.")
     case nil:
-      guard let mode, mode != .fill else { return nil }
+      guard let mode, mode != .fill, mode != .fillBlurred else { return nil }
       return L(
         "This display uses \(scalingModeName(mode)) scaling. Black bars can be hidden with Fill and a scale factor."
       )
@@ -317,6 +317,7 @@ enum InspectorWording {
     case .match: L("Fit")
     case .fill: L("Fill")
     case .matchBlurred: L("Fit with blurred backdrop")
+    case .fillBlurred: L("Fill with blurred backdrop")
     }
   }
 

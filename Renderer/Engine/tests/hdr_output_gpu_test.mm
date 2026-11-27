@@ -220,6 +220,7 @@ TEST(HdrOutputGpu, DisplayLayoutPreservesZoomPanFlipPointerAndBlurModeTransition
         {WallpaperScalingMode::STRETCH,1.0,0.5,0.5,false},
         {WallpaperScalingMode::NONE,1.0,0.2,0.8,true},
         {WallpaperScalingMode::FIT_BLURRED,1.3,0.2,0.7,true},
+        {WallpaperScalingMode::FILL_BLURRED,0.75,0.2,0.7,true},
         {WallpaperScalingMode::FILL,1.0,0.5,0.5,false},
     };
     const Rgba palette[] {{200,40,20,255},{40,180,70,255},{10,40,170,255},
@@ -255,7 +256,7 @@ TEST(HdrOutputGpu, DisplayLayoutPreservesZoomPanFlipPointerAndBlurModeTransition
         const auto* target=hdr.scene().FindRenderTarget(SpecTex_Default);
         ASSERT_NE(target,nullptr);
         EXPECT_EQ(target->width,96);
-        EXPECT_EQ(target->height,value.mode==WallpaperScalingMode::FIT_BLURRED?96:64);
+        EXPECT_EQ(target->height,wallpaper::WallpaperScalingModeHasBlurredBackdrop(value.mode)?96:64);
         if (hdr.scene().display_framed) {
             const auto layout=ComputeWallpaperScalingLayout(value.mode,64,64,96,64,1.0,
                                                               value.zoom,value.x,value.y);
@@ -295,7 +296,8 @@ TEST(HdrOutputGpu, DisplayFramingPreservesFullscreenAndLocalScreenCopies) {
         GpuScene copied(package,options);
         ASSERT_TRUE(copied.ok()) << copied.error();
         for (const auto mode : {WallpaperScalingMode::FILL,WallpaperScalingMode::FIT,
-                                WallpaperScalingMode::FIT_BLURRED,WallpaperScalingMode::FILL}) {
+                                WallpaperScalingMode::FIT_BLURRED,WallpaperScalingMode::FILL_BLURRED,
+                                WallpaperScalingMode::FILL}) {
             SCOPED_TRACE(static_cast<int>(mode));
             for (GpuScene* scene : {&reference,&copied}) {
                 if (scene->renderer().SetWallpaperScalingMode(mode)) ASSERT_TRUE(scene->Rebuild());
@@ -477,8 +479,8 @@ TEST(SdrDisplayFraming, StretchFitAndBlurredFitDrawTheWholeRaster) {
     WindowPair pair(package,options);
     ASSERT_TRUE(pair.whole().ok() && pair.framed().ok());
     for (const auto mode : {WallpaperScalingMode::STRETCH,WallpaperScalingMode::FIT,
-                            WallpaperScalingMode::FIT_BLURRED,WallpaperScalingMode::NONE,
-                            WallpaperScalingMode::FILL}) {
+                            WallpaperScalingMode::FIT_BLURRED,WallpaperScalingMode::FILL_BLURRED,
+                            WallpaperScalingMode::NONE,WallpaperScalingMode::FILL}) {
         SCOPED_TRACE(static_cast<int>(mode));
         const auto [whole,framed]=pair.Run({.mode=mode});
         const auto state=pair.framed().renderer().RasterWindowStateForTests();

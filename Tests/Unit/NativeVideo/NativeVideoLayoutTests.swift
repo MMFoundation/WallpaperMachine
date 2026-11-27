@@ -171,6 +171,30 @@ final class NativeVideoLayoutTests: XCTestCase {
         }
     }
 
+    /// The native player has no blurred backdrop: Fill with blurred backdrop is laid out as Fill
+    /// here, keeping Fill's crop at factor 1 and black bars when scaled down.
+    func testFillWithBlurredBackdropIsLaidOutAsFill() {
+        let viewport = CGSize(width: 3440, height: 1440)
+        let video = CGSize(width: 3840, height: 2160)
+        for factor in [1.0, 0.8, 0.5] {
+            XCTAssertEqual(
+                NativeVideoLayout.pictureRect(
+                    mode: .fillBlurred, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2),
+                NativeVideoLayout.pictureRect(
+                    mode: .fill, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2))
+            XCTAssertEqual(
+                NativeVideoLayout.placement(
+                    mode: .fillBlurred, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2),
+                NativeVideoLayout.placement(
+                    mode: .fill, factor: factor, videoSize: video, viewport: viewport,
+                    backingScale: 2))
+        }
+        XCTAssertFalse(NativeVideoPlayer.borderShows(for: .fillBlurred))
+    }
+
     func testOriginalSizeAndScaleFactorsWaitForThePicturesSize() {
         let viewport = CGSize(width: 1512, height: 982)
         for (mode, factor) in [

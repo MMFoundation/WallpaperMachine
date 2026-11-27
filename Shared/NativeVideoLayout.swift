@@ -3,23 +3,27 @@ import CoreGraphics
 
 /// How a picture is scaled to its display, by the numbers the lock-screen configuration
 /// and the renderer use: none (original size) 0, stretch 1, fit 2, fill 3. Fit with a blurred
-/// backdrop is the renderer's number 4; here it is a case of its own that is laid out as Fit, and
-/// `init(rendererValue:)` is how those numbers come in. Its `rawValue` is only this enum's tag.
+/// backdrop is 4 and Fill with a blurred backdrop is 5; here each is a case of its own that is
+/// laid out as Fit or Fill respectively, and `init(rendererValue:)` is how those numbers come in.
+/// Its `rawValue` is only this enum's tag.
 enum NativeVideoScalingMode: Int32, Equatable, Sendable {
     case none = 0
     case stretch = 1
     case match = 2
     case fill = 3
     case matchBlurred = 5
+    case fillBlurred = 6
 
     /// The mode for a number of the lock-screen configuration or the renderer.
     init?(rendererValue: Int32) {
-        if rendererValue == 4 {
-            self = .matchBlurred
-        } else if let mode = NativeVideoScalingMode(rawValue: rendererValue), mode != .matchBlurred {
-            self = mode
-        } else {
-            return nil
+        switch rendererValue {
+        case 0: self = .none
+        case 1: self = .stretch
+        case 2: self = .match
+        case 3: self = .fill
+        case 4: self = .matchBlurred
+        case 5: self = .fillBlurred
+        default: return nil
         }
     }
 }
@@ -128,7 +132,7 @@ enum NativeVideoLayout {
         case .match, .matchBlurred:
             scaleX = min(ratioX, ratioY)
             scaleY = scaleX
-        case .fill:
+        case .fill, .fillBlurred:
             scaleX = max(ratioX, ratioY)
             scaleY = scaleX
         }
@@ -155,7 +159,7 @@ enum NativeVideoLayout {
         // The gravity rules centre the picture, so a position needs the explicit frame.
         if normalizedFactor(factor) == 1, pan.normalized == .centered {
             switch mode {
-            case .fill: return .gravity(.resizeAspectFill)
+            case .fill, .fillBlurred: return .gravity(.resizeAspectFill)
             // The native player has no blurred fill: its bars stay black.
             case .match, .matchBlurred: return .gravity(.resizeAspect)
             case .stretch: return .gravity(.resize)
@@ -198,7 +202,7 @@ enum NativeVideoLayout {
                   bytesPerRow: width * 4, space: space,
                   bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.noneSkipLast.rawValue)
         else { return nil }
-        let showsBorder = mode != .fill && mode != .stretch
+        let showsBorder = mode != .fill && mode != .fillBlurred && mode != .stretch
         context.setFillColor((showsBorder ? borderColor : nil) ?? CGColor(gray: 0, alpha: 1))
         context.fill(CGRect(x: 0, y: 0, width: width, height: height))
         // The context is the display in device pixels, so the layout is asked

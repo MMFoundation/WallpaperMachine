@@ -558,27 +558,34 @@ HTML is never rewritten.
 ### Fit with blurred backdrop
 
 A display's **Scaling mode** in the inspector, and **Scaling** in **Settings › Displays**
-(where it reads **Match with blurred backdrop**), offers **Fit with blurred backdrop** for
-scene and video wallpapers. It shows the whole wallpaper as Fit does, and where the
-display's shape differs from the wallpaper's (a 16:9 scene on a 3440 x 1440 ultrawide or
-a 2056 x 1329 MacBook panel) it fills the room around it with a blurred, darker copy of
-the same moving picture instead of black. The picture itself is Fit's, pixel for pixel;
-the copy covers the screen the way Fill would, centred. Fill, Wallpaper Engine's
-**Cover**, stays the default; Wallpaper Engine itself has no blurred fill.
+(where it reads **Match with blurred backdrop**), offers **Fit with blurred backdrop** and
+**Fill with blurred backdrop** for scene and video wallpapers.
 
-Like every scaling mode it is saved at once, for that wallpaper on that display, and the
-running wallpaper changes without restarting. The scale factor and the position sliders
-move and size the picture as under Fit; the copy behind it stays centred. Nothing is
-blurred, and nothing extra is drawn, when the wallpaper already fits the display's
-shape. The lock screen, the screen saver and the Mission Control picture show the same
-copy. A video the native video player draws keeps Fit's black bars, on the desktop and in
-its Mission Control picture (the lock screen and the screen saver still blur them): the
-player has no blurred fill, and a note under the menu says so, with **Open Performance** to choose
-Compatibility for **Video playback**, which draws the copy. A web page always fills its
-window, so the menu offers the mode only for scenes and videos (a display already set to
-it keeps it listed). It costs GPU time on every frame drawn
-([scene rendering](scene-rendering.md#fit-with-blurred-backdrop)). An older build reads the
-saved choice as Fill.
+- **Fit with blurred backdrop** shows the whole wallpaper as Fit does, and where the
+  display's shape differs from the wallpaper's (a 16:9 scene on a 3440 x 1440 ultrawide or
+  a 2056 x 1329 MacBook panel), or when scaled down, it fills the room around it with a
+  blurred, darker copy of the same moving picture instead of black.
+- **Fill with blurred backdrop** lays the picture out as Fill does: at 100% (Scale factor
+  1) or above it covers the display with no extra blur pass, and when scaled down below
+  100% it fills the room around the shrunk picture with the same blurred, darker copy of
+  the live picture instead of black.
+
+In both modes the picture itself is Fit's or Fill's, pixel for pixel; the copy covers the
+screen the way Fill at Scale factor 1 would, centred. Fill, Wallpaper Engine's **Cover**,
+stays the default; Wallpaper Engine itself has no blurred fill.
+
+Like every scaling mode each choice is saved at once, for that wallpaper on that display,
+and the running wallpaper changes without restarting. The scale factor and the position
+sliders move and size the picture as under Fit or Fill; the copy behind it stays centred.
+Nothing is blurred, and nothing extra is drawn, when the picture already covers the
+display. The lock screen, the screen saver and the Mission Control picture show the same
+copy for scenes. A plain video played by the native video player keeps Fit's or Fill's
+black bars (the player has no blurred fill, and a note under the menu says so). A web page
+always fills its window, so the menu offers the blurred modes only for scenes and videos
+(a display already set to one keeps it listed). When a composition leaves room to fill,
+the copy costs GPU time on every frame drawn
+([scene rendering](scene-rendering.md#fit-with-blurred-backdrop)). An older build reads
+either saved choice as Fill.
 
 ### Display position
 
@@ -586,8 +593,9 @@ A scene or video wallpaper's card for each display, in the inspector's **Display
 section, has **Horizontal position** and **Vertical position** sliders (0 to 100%, 50% is
 the middle) and a **Center** link, below the frame rate. They decide where the wallpaper
 sits when the display leaves room around it (Fit, Fit with blurred backdrop, Original
-size, or a Scale factor below 1, which is a Scale percentage below 100%) and which part stays in view when it is larger than the
-display (Fill, or a factor above 1). Nothing moves when it already fits the display exactly, and an axis
+size, or a Scale factor below 1, which is a Scale percentage below 100%, including under
+Fill with blurred backdrop) and which part stays in view when it is larger than the
+display (Fill, Fill with blurred backdrop at or above 100%, or a factor above 1). Nothing moves when it already fits the display exactly, and an axis
 with no room to spare does not move; the note under the sliders says so. The block is
 not offered for a web wallpaper (an image page keeps **Position on screen**, above),
 and a mirror display has no card, because it is always centred.

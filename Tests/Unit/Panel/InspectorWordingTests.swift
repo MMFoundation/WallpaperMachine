@@ -342,6 +342,8 @@ final class InspectorWordingTests: InspectorTestCase {
       "This display uses Original size scaling. Black bars can be hidden with Fill and a scale factor.")
     XCTAssertNil(detail(nil, mode: nil), "a display that cannot be found has nothing to say")
     XCTAssertNil(detail(nil, mode: .fill))
+    XCTAssertNil(detail(nil, mode: .fillBlurred))
+    XCTAssertEqual(InspectorWording.scalingModeName(.fillBlurred), L("Fill with blurred backdrop"))
   }
 
   /// Port of `ControlPanelLetterboxTests.testCardShowsTheMeasuredBars...` (the card's words and

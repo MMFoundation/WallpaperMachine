@@ -26,20 +26,14 @@ fn mirror_display() -> DisplaySnapshotEntry {
 }
 
 #[test]
-fn the_blurred_fit_converts_to_the_engine_mode_and_back() {
-    assert_eq!(
-        ScalingMode::from(BridgeScalingMode::MatchBlurred),
-        ScalingMode::FitBlurred
-    );
-    assert_eq!(
-        BridgeScalingMode::from(ScalingMode::FitBlurred),
-        BridgeScalingMode::MatchBlurred
-    );
+fn the_blurred_modes_convert_to_the_engine_mode_and_back() {
     for (bridge, core) in [
         (BridgeScalingMode::None, ScalingMode::None),
         (BridgeScalingMode::Stretch, ScalingMode::Stretch),
         (BridgeScalingMode::Match, ScalingMode::Fit),
         (BridgeScalingMode::Fill, ScalingMode::Fill),
+        (BridgeScalingMode::MatchBlurred, ScalingMode::FitBlurred),
+        (BridgeScalingMode::FillBlurred, ScalingMode::FillBlurred),
     ] {
         assert_eq!(ScalingMode::from(bridge), core);
         assert_eq!(BridgeScalingMode::from(core), bridge);
@@ -47,16 +41,21 @@ fn the_blurred_fit_converts_to_the_engine_mode_and_back() {
 }
 
 #[test]
-fn a_wallpapers_display_setting_reads_and_writes_fit_blurred() {
-    let render: MonitorRender = serde_json::from_value(serde_json::json!({
-        "selector": { "kind": "primary" },
-        "scaling_mode": "fit_blurred",
-        "scaling_factor": 1.0
-    }))
-    .expect("render setting");
-    assert_eq!(render.parse_scaling_mode(), ScalingMode::FitBlurred);
-    let written = serde_json::to_value(&render).expect("serialize");
-    assert_eq!(written["scaling_mode"], "fit_blurred");
+fn a_wallpapers_display_setting_reads_and_writes_blurred_modes() {
+    for (name, expected) in [
+        ("fit_blurred", ScalingMode::FitBlurred),
+        ("fill_blurred", ScalingMode::FillBlurred),
+    ] {
+        let render: MonitorRender = serde_json::from_value(serde_json::json!({
+            "selector": { "kind": "primary" },
+            "scaling_mode": name,
+            "scaling_factor": 1.0
+        }))
+        .expect("render setting");
+        assert_eq!(render.parse_scaling_mode(), expected);
+        let written = serde_json::to_value(&render).expect("serialize");
+        assert_eq!(written["scaling_mode"], name);
+    }
 
     let unknown = MonitorRender {
         scaling_mode: "cinematic".into(),
@@ -70,25 +69,30 @@ fn a_wallpapers_display_setting_reads_and_writes_fit_blurred() {
 }
 
 #[test]
-fn a_displays_monitor_entry_reads_and_writes_fit_blurred() {
-    let mut app = AppConfig::default();
-    app.monitor_settings.push(MonitorSettingsCfg {
-        selector: SerializedSelector::LiveDisplayId { display_id: 6 },
-        scaling_mode: ScalingMode::FitBlurred.to_string(),
-        ..MonitorSettingsCfg::default()
-    });
-    let home = tempfile::tempdir().expect("temporary home");
-    let store = ConfigStore::open(home.path());
-    store.save_app_config(&app).expect("save");
-    let text = std::fs::read_to_string(home.path().join("config.toml")).expect("saved file");
-    assert!(text.contains("scaling_mode = \"fit_blurred\""), "{text}");
+fn a_displays_monitor_entry_reads_and_writes_blurred_modes() {
+    for (mode, expected_name) in [
+        (ScalingMode::FitBlurred, "fit_blurred"),
+        (ScalingMode::FillBlurred, "fill_blurred"),
+    ] {
+        let mut app = AppConfig::default();
+        app.monitor_settings.push(MonitorSettingsCfg {
+            selector: SerializedSelector::LiveDisplayId { display_id: 6 },
+            scaling_mode: mode.to_string(),
+            ..MonitorSettingsCfg::default()
+        });
+        let home = tempfile::tempdir().expect("temporary home");
+        let store = ConfigStore::open(home.path());
+        store.save_app_config(&app).expect("save");
+        let text = std::fs::read_to_string(home.path().join("config.toml")).expect("saved file");
+        assert!(
+            text.contains(&format!("scaling_mode = \"{expected_name}\"")),
+            "{text}"
+        );
 
-    let loaded = store.load().expect("load").config;
-    assert_eq!(
-        loaded.monitor_settings[0].parse_scaling_mode(),
-        ScalingMode::FitBlurred
-    );
-    assert_eq!(loaded, app);
+        let loaded = store.load().expect("load").config;
+        assert_eq!(loaded.monitor_settings[0].parse_scaling_mode(), mode);
+        assert_eq!(loaded, app);
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -204,4 +208,97 @@ async fn a_mirror_display_takes_the_blurred_fit_and_reports_it() {
         wallpaper_core::project::SceneHandle::new(4),
         ScalingMode::FitBlurred
     )));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn setting_the_blurred_fill_for_a_wallpaper_and_mirror_is_applied_saved_and_reported() {
+    let engine = FakeEngineFacade::default();
+    let scene = foreign_scene(&main_display(), DRIFT);
+    let mirrored = foreign_scene(&mirror_display(), DRIFT);
+    engine.set_snapshot(vec![
+        live(main_display(), 3, &scene, false),
+        live(mirror_display(), 4, &mirrored, false),
+    ]);
+    let mirror_selector = mirror_display().connected_selector();
+    let mut app = AppConfig::default();
+    app.monitors = vec![
+        showing(SerializedSelector::Primary, DRIFT),
+        MonitorCfg {
+            selector: mirror_selector.clone(),
+            mode: "mirror".into(),
+            mirror_target: Some(SerializedSelector::Primary),
+            ..MonitorCfg::default()
+        },
+    ];
+    let fixture = bridge(&engine, installed(app, vec![(DRIFT, None)]), true);
+
+    let bundle = fixture
+        .bridge
+        .set_scaling_mode(
+            DRIFT.into(),
+            "primary".into(),
+            BridgeScalingMode::FillBlurred,
+        )
+        .await
+        .expect("set fill blurred");
+    let row = bundle
+        .wallpaper_options
+        .display_configurations
+        .iter()
+        .find(|row| row.display_id == "primary")
+        .expect("primary row");
+    assert_eq!(row.scaling_mode, BridgeScalingMode::FillBlurred);
+    assert!(
+        bundle
+            .monitor_information
+            .rows
+            .iter()
+            .any(|row| row.scaling_mode == "FillBlurred"),
+        "{:?}",
+        bundle.monitor_information.rows
+    );
+
+    let mirror_bundle = fixture
+        .bridge
+        .set_mirror_scaling_mode("6".into(), BridgeScalingMode::FillBlurred)
+        .await
+        .expect("set mirror fill blurred");
+    let mirror_row = mirror_bundle
+        .settings
+        .displays
+        .iter()
+        .find(|row| row.display_id == mirror_selector.id())
+        .expect("mirror row");
+    assert_eq!(mirror_row.scaling_mode, BridgeScalingMode::FillBlurred);
+
+    assert_eq!(
+        engine.scaling_mode_calls(),
+        vec![
+            (
+                wallpaper_core::project::SceneHandle::new(3),
+                ScalingMode::FillBlurred
+            ),
+            (
+                wallpaper_core::project::SceneHandle::new(4),
+                ScalingMode::FillBlurred
+            ),
+        ]
+    );
+
+    let store = ConfigStore::open(fixture.home.path().join("support"));
+    let saved = store.load_wallpaper(DRIFT).expect("saved wallpaper");
+    let render = saved
+        .monitors
+        .iter()
+        .find(|render| render.selector == SerializedSelector::Primary)
+        .expect("primary render setting");
+    assert_eq!(render.scaling_mode, "fill_blurred");
+    assert_eq!(render.parse_scaling_mode(), ScalingMode::FillBlurred);
+    let saved_app = store.load().expect("saved app").config;
+    let mirror_settings = saved_app
+        .monitor_settings
+        .iter()
+        .find(|settings| settings.selector == mirror_selector)
+        .expect("mirror settings");
+    assert_eq!(mirror_settings.scaling_mode, "fill_blurred");
 }

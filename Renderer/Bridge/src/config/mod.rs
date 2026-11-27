@@ -36,6 +36,8 @@ fn scaling_mode(raw: &str) -> wallpaper_core::project::ScalingMode {
         ScalingMode::Fit
     } else if raw.eq_ignore_ascii_case("fit_blurred") {
         ScalingMode::FitBlurred
+    } else if raw.eq_ignore_ascii_case("fill_blurred") {
+        ScalingMode::FillBlurred
     } else {
         ScalingMode::Fill
     }
