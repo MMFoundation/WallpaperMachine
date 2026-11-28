@@ -126,6 +126,15 @@ final class QuitReasonTests: XCTestCase {
         XCTAssertEqual(QuitMode.resolve(reason: .update, powerOffNotified: true), .powerOff)
     }
 
+    func testInstallerWaitingAtRefusalHandsOverWithoutAnotherQuitEvent() {
+        for reason in [QuitReason.user, .signal] {
+            XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: false, updateInstallPending: true),
+                           .handover)
+            XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: true, updateInstallPending: true),
+                           .powerOff)
+        }
+    }
+
     // MARK: What the session ledger keeps
 
     func testAQuitThatWentToPlanKeepsThePlainReason() {

@@ -546,8 +546,8 @@ Restoration that is cut short loses nothing. `restoreForTermination` stops at th
 `originals.json` until its poster is no longer shown. The desktop may keep showing the last
 poster after the next login until the app runs again, and the original it replaced is still
 on record to put back, as after a crash ([the journal](#the-journal-of-originals)). The log
-says that the desktop restoration is unfinished and that the poster journal will finish it
-at the next launch (`quit: power off; desktop restoration unfinished (…)`). The session
+says that desktop restoration is unfinished and the recovery records are kept
+(`quit: power off; desktop restoration unfinished (…)`). The session
 ledger keeps `logout; desktop restoration unfinished` as the quit's reason, so the next
 launch's `previous session:` line reads `quit normally (logout; desktop restoration
 unfinished)` and not a crash.
@@ -562,8 +562,9 @@ a second user quit is refused, but a logout, restart or shutdown (and anything t
 during one) waits for the quit that is running and is answered with it, so it is not
 refused either. If the user's quit then fails to restore, it is tried again once under the
 power-off limits instead of being refused. An update that asks while a user's quit runs is
-answered the same way, and a quit it joined is tried again as an update's
-([updates](#updates)) rather than refused.
+answered the same way. Before refusing a quit, the app checks whether Sparkle is now
+waiting to relaunch it. If so, it retries as an [update](#updates), even if AppKit has
+not delivered a second quit request.
 
 ### Updates
 

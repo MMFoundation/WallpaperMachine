@@ -1521,7 +1521,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task {
             var supervisor = QuitSupervisor(mode: mode)
             var outcome = await runQuitStages(on: supervisor, restorer: wallpaperRestorer)
-            if case .cancel = outcome, let joined = joinedQuitMode {
+            let joined = QuitMode.resolve(
+                reason: reason, powerOffNotified: joinedQuitMode == .powerOff || powerOffNotice.isCurrent(),
+                updateInstallPending: joinedQuitMode == .handover || updates.isRelaunching)
+            if case .cancel = outcome, !joined.refusesUnrestored {
                 // The user's quit would have been refused, but the system or an update has asked
                 // to leave in the meantime. Try again within its time limits and do not refuse.
                 AppLog.info(joined == .powerOff
@@ -1540,7 +1543,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     cancellation, restorationBudget: supervisor.budgets.restoration,
                     restoringPanel: panelWasVisible)
                 sender.reply(toApplicationShouldTerminate: false)
-                updates.quitWasCancelled()
                 presentQuitFailure(cancellation)
                 rebuildMenu()
             case .proceed(let stalled):
@@ -1752,7 +1754,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             powerOffNotified: powerOffNotified,
             updateInstallPending: updateInstallPending,
             terminationSignal: signal)
-        let mode = QuitMode.resolve(reason: reason, powerOffNotified: powerOffNotified)
+        let mode = QuitMode.resolve(
+            reason: reason, powerOffNotified: powerOffNotified, updateInstallPending: updateInstallPending)
         let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "none"
         AppLog.info(
             "quit: reason=\(reason.rawValue) mode=\(mode.rawValue) "

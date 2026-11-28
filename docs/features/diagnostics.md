@@ -178,16 +178,16 @@ already running too, which is how a second Exit or a logout during a user quit s
 quit: reason=logout mode=powerOff from=com.apple.loginwindow (pid 412) frontmost=com.apple.loginwindow panelVisible=false updateInstallPending=false alreadyInProgress=false powerOffNotified=true appleEventReason='rlgo' signal=none
 ```
 
-`mode` is how the quit behaves: `powerOff` when the reason is a logout, restart or shutdown or
-macOS announced one (a signal that arrives during a shutdown is still `powerOff`), otherwise
-`interactive`. A power-off quit has shorter deadlines and is never refused; see
-[desktop picture](desktop-picture.md#logout-restart-and-shutdown).
+`mode` is how the quit behaves. A logout, restart, shutdown or power-off announcement selects
+`powerOff`, with shorter deadlines. A pending update install selects `handover`, with ordinary
+deadlines. Neither mode refuses to quit if restoration fails. Other quits are `interactive`;
+see [desktop picture](desktop-picture.md#updates).
 
 `from` (`QuitRequester`) says who asked: `menu` for the app's own Quit or Exit, the bundle
 identifier (or, for a program without one, its file name) and pid of the process that sent
 the quit Apple event (`com.apple.dock`, `com.apple.loginwindow`, `osascript`, another app;
 `exited` when it is already gone), `self` for an event the app sent itself, and `none` when
-neither applies (a signal, the updater). `frontmost` is not the requester: choosing Exit in
+neither applies (for example, a signal). `frontmost` is not the requester: choosing Exit in
 the menu-bar menu leaves the other app frontmost, so only `from` tells that Exit apart from
 a quit another program sent.
 
@@ -202,9 +202,9 @@ a quit another program sent.
 | `user` | anything else: the menu, the Dock, another app's plain quit; `from` names which |
 
 The event's reason is a parameter of the quit event, readable only while that event is being
-handled, so it is read at the top of `applicationShouldTerminate` and nowhere else. A quit
-that comes from a menu or from the updater has no event. The power-off announcement is
-believed for 120 seconds (a judgment, not a measurement) and forgotten when a quit is
+handled, so it is read at the top of `applicationShouldTerminate` and nowhere else. A menu
+quit has no event. Sparkle announces its relaunch before the installer sends a quit event.
+The power-off announcement is believed for 120 seconds (a judgment, not a measurement) and forgotten when a quit is
 refused: nothing tells the app when another app cancels a logout, and a stale announcement
 would otherwise relabel the next Quit. The reason is also written to the session ledger,
 so the next launch's `previous session:` line names it, including for a quit that never
@@ -232,9 +232,9 @@ and the lines say what happened when one is missed:
 | `quit: stage restore had not finished after N ms and was left behind`, then `quit: cancelled after …` | restoration took longer than 20 s; the quit is refused. `Quit cancelled because wallpaper restoration did not finish within N ms` follows at `ERROR` |
 | `quit: stage <name> had not finished after N ms and was left behind`, then `quit: finished without <names> after …` | a later stage outlived its share of the 10 s teardown budget; the quit went on without it. `quit: going on without <names>, which did not finish in time` follows at `WARN`. A stage that had no time left at all is still started, and logged this way too |
 | `quit: stage <name> took N ms and failed: <error>` | a later stage threw; the quit went on |
-| `quit: power off; desktop restoration unfinished (<why>), the poster journal will finish it at the next launch`, then `quit: finished without restore …` | a logout, restart or shutdown: restoration threw or took longer than 3 s, and the quit went on instead of being refused. The stage line before it says which |
-| `quit: update; desktop restoration unfinished (<why>), the poster journal will finish it at the next launch`, then `quit: finished without restore …` | an update is replacing the app: restoration threw or took longer than 20 s, and the quit went on so the install is not stranded. The new version finishes the restoration as it starts |
-| `quit: already in progress, this request waits for it` | a request to quit arrived during a quit and was not refused, because it was a logout, restart or shutdown or the quit running was one. The quit that is running answers both when it finishes |
+| `quit: power off; desktop restoration unfinished (<why>), keeping recovery records`, then `quit: finished without restore …` | a logout, restart or shutdown: restoration threw or took longer than 3 s, and the quit went on instead of being refused. The stage line before it says which |
+| `quit: update; desktop restoration unfinished (<why>), keeping recovery records`, then `quit: finished without restore …` | restoration threw or took longer than 20 s. Installation proceeds; the new version retains the originals for [desktop recovery](desktop-picture.md#updates) |
+| `quit: already in progress, this request waits for it` | an update or system quit arrived during another quit, or was already running. The running quit answers both |
 | `quit: a logout, restart or shutdown arrived during this quit; going on under its time limits` | the user's quit failed to restore the desktop after such a request had joined it. Instead of being refused it is run once more with the power-off limits |
 | `quit: already in progress, this request is refused` | a second user quit during a user quit. A SIGTERM that arrives during one is logged this way too: the quit that is running is the answer, and a further signal would end the app at once |
 | `signal: SIGTERM received; quitting in order, and a second one ends the app at once` | the first SIGTERM or SIGHUP, logged off the main thread before it is handed to the main run loop, so a stalled main thread still leaves the reason. The `quit:` line follows when the request is handled |

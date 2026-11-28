@@ -49,9 +49,10 @@ verification or approve a download on your behalf.
 ## Installing
 
 Sparkle stages the verified app and offers to install and relaunch. WallpaperMachine’s
-normal quit sequence still restores the desktop, but an update's quit never refuses: what
-it cannot restore, the new version finishes as it starts
-([updates](desktop-picture.md#updates)). Updating does not replace the wallpaper
+normal quit sequence still tries to restore the desktop, but restoration failure does not
+block installation. The new version keeps the original wallpaper records: with desktop
+picture writing off it retries at launch; with writing on it resumes posters and restores
+the originals at a later quit ([desktop recovery](desktop-picture.md#updates)). Updating does not replace the wallpaper
 library or settings. The app does not run a shell script to replace itself. Local Debug
 builds have no production feed, and an app without a release public key or in the immutable
 Nix store does not start an updater. Update Nix-managed copies through Nix.

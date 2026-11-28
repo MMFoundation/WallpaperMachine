@@ -150,7 +150,7 @@ final class QuitSupervisor {
             case .restorationTimedOut: "not finished after \(budgets.restoration.wholeMilliseconds) ms"
             }
             let who = mode == .handover ? "update" : "power off"
-            log("quit: \(who); desktop restoration unfinished (\(why)), the poster journal will finish it at the next launch")
+            log("quit: \(who); desktop restoration unfinished (\(why)), keeping recovery records")
         }
 
         let deadline = now().advanced(by: budgets.teardown)
@@ -219,8 +219,7 @@ enum QuitMode: String, Equatable, Sendable {
     /// An update installer is waiting to replace the app and start the new version. Restoring
     /// takes as long as an interactive quit's, but the quit never refuses: a refusal leaves
     /// the installer waiting for good, so every later update fails the same way while the
-    /// state that refused stays. The new version starts at once, and its launch repair
-    /// finishes from the journals whatever restoration left.
+    /// state that refused stays. The new version takes over the recovery journals.
     case handover
     /// macOS is logging out, restarting or shutting down. The system is waiting for this
     /// app, and a refusal cancels the logout for every app and shows the user a dialog, so
@@ -230,9 +229,9 @@ enum QuitMode: String, Equatable, Sendable {
     /// Pure, so every combination is exercised without a logout. The announcement counts
     /// as well as the reason because a signal that arrives during a shutdown has the
     /// reason `signal`, and it is still the shutdown that is waiting.
-    static func resolve(reason: QuitReason, powerOffNotified: Bool) -> QuitMode {
+    static func resolve(reason: QuitReason, powerOffNotified: Bool, updateInstallPending: Bool = false) -> QuitMode {
         if powerOffNotified || reason.isPowerOff { return .powerOff }
-        return reason == .update ? .handover : .interactive
+        return reason == .update || updateInstallPending ? .handover : .interactive
     }
 
     var budgets: QuitSupervisor.Budgets {
