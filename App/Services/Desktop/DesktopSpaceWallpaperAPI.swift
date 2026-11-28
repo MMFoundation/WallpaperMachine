@@ -220,9 +220,12 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
         let file = lockScreenFolder.appendingPathComponent(LockScreenWallpaperSelection.journalName)
         let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let stamp = (values?.contentModificationDate, values?.fileSize)
-        if let journaled, journaled.stamp == stamp { return journaled.urls }
+        // An unknown stamp (no journal, or metadata that could not be read) is never cached:
+        // a missing journal is cheap to look for, and an unreadable one must reach the reader.
+        let known = stamp.0 != nil && stamp.1 != nil
+        if known, let journaled, journaled.stamp == stamp { return journaled.urls }
         let urls = try LockScreenWallpaperSelection.journaledPictureURLs(in: lockScreenFolder)
-        journaled = (stamp, urls)
+        journaled = known ? (stamp, urls) : nil
         return urls
     }
 
