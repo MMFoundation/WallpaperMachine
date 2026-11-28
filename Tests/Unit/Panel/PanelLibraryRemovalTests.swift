@@ -77,6 +77,24 @@ final class PanelLibraryRemovalTests: PanelTestCase {
     }
   }
 
+  func testMirrorDeletionPreservesAReinstalledWallpaperAndItsMetadata() async throws {
+    try await withApplyingPanel { panel, bridge, _ in
+      let folder = panel.library.appendingPathComponent("a")
+      let original = try XCTUnwrap(LinkedFolderDestinationIdentity.read(folder))
+      try FileManager.default.moveItem(at: folder, to: panel.library.appendingPathComponent("previous-a"))
+      try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+      try rememberWallpapers(panel)
+      panel.controller.recycleWallpaperFolder = { _ in XCTFail("The reinstall must not be trashed") }
+
+      let retired = try await panel.controller.removeLinkedFolderWallpapers(["a"], destinations: ["a": original]) { ["a"] }
+      XCTAssertEqual(retired, ["a"])
+      XCTAssertEqual(panel.controller.favoriteIDs, ["a", "b"])
+      XCTAssertEqual(panel.playlists.playlist(for: "primary").wallpaperIDs, ["a", "b"])
+      XCTAssertTrue(bridge.ejections.isEmpty)
+      XCTAssertTrue(FileManager.default.fileExists(atPath: folder.path))
+    }
+  }
+
   func testTheQuestionIsAskedAtOnceWhileACommandRunsAndOnlyTheDeletionWaitsForTheQueue() async throws {
     try await withApplyingPanel { panel, bridge, _ in
       let controller = panel.controller

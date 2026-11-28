@@ -79,6 +79,7 @@ file; pass `rg -u` to search them deliberately.
 | [features/first-run.md](features/first-run.md) | The first-run guide over the window, the one-time support prompt a day after the first downloaded wallpaper, the later star prompt, the performance data question, the battery question, the subscriptions offer and the Discord invitation |
 | [features/wallpaper-properties.md](features/wallpaper-properties.md) | Inspector properties, live preview, property presets, image placement, the compatibility check and the black-bar check |
 | [features/library-location.md](features/library-location.md) | Settings → Storage → Wallpaper library location: moving the library and downloads to another folder or an external drive and back, what moves, the copy now and the switch at the next launch, a drive that is not connected |
+| [features/linked-folders.md](features/linked-folders.md) | Settings → Library & Steam → Linked folders: folders of your own wallpapers the library follows, what a link records, when it looks, renames, Mirror deletions and the mass-removal guard |
 | [features/backup-restore.md](features/backup-restore.md) | The Settings → Storage backup package (settings, allowlisted preferences, chosen user files) and restoring it |
 | [features/updates.md](features/updates.md) | Signed Sparkle updates, automatic checks, reminders, install consent and release notes |
 | [features/workshop-downloads.md](features/workshop-downloads.md) | Discover, SteamCMD setup, QR-code sign-in, download queue |

@@ -105,6 +105,7 @@ nix-darwin을 통한 선언적 설정 방법을 확인할 수 있습니다.
 | [**에너지**](docs/features/performance.md#energy-use) | 설정 → 성능에서 앱이 쓰는 전력을 보여 주고, 노트북에서는 시간당 배터리 소모량도 보여 줍니다. 여기서 설정을 바꾸면 변경 전후를 비교합니다. 설치된 배경화면은 측정이 끝나면 각각 에너지 등급이 표시됩니다. |
 | [**네이티브**](docs/features/appearance.md) | 다른 macOS 앱처럼 라이트, 다크, 강조 색상을 따르며, English, [简体中文, 繁體中文, 日本語, 한국어, Português](docs/features/control-panel.md#language)를 지원합니다. |
 | [**가져오기**](docs/features/control-panel.md#downloads-and-import) | 갖고 있는 Wallpaper Engine 폴더나 내 동영상과 사진을 가져옵니다. 보관함이나 Dock 아이콘에 끌어다 놓거나 **가져오기**를 사용하세요. 앱은 파일을 복사하고 원본은 그대로 둡니다. |
+| [**연결된 폴더**](docs/features/linked-folders.md) | 내 배경화면 폴더를 한 번만 연결하세요. 폴더에 넣은 배경화면은 보관함에 나타나고, **삭제 반영**을 켜면 폴더에서 삭제한 파일은 보관함에서도 사라집니다. |
 | [**설정 보관**](docs/features/backup-restore.md#local-backup-and-restore) | 설정과 앱이 보관한 파일을 내보내고, 원하면 배경화면 보관함 전체도 함께 내보냅니다. 복원은 다음 실행 때 적용되며 되돌릴 수 있고, 적용 전에 충돌을 미리 확인합니다. 로그인 정보와 비밀번호는 이 Mac에만 남습니다. |
 | [**외장 드라이브**](docs/features/library-location.md) | 배경화면 보관함과 다운로드를 외장 드라이브나 다른 폴더에 두고, 언제든 이 Mac으로 다시 옮길 수 있습니다. 설정과 Steam 로그인 정보는 이 Mac에 남습니다. |
 | [**이미지 배치**](docs/features/wallpaper-properties.md#image-placement) | 가져온 사진과 저장한 pixiv 페이지의 위치와 크기를 디스플레이마다 따로 조정합니다. 원본 이미지는 바뀌지 않습니다. |

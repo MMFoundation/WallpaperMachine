@@ -29,6 +29,8 @@ final class PanelController {
   let updater: SoftwareUpdateStatus
   /// Library imports, owned by the app so one outlives this panel.
   let imports: LibraryImportStore
+  /// The folders the library follows; the app's, so they are followed while the panel is closed.
+  let linkedFolders: LinkedFolderCoordinator
   let importPicker = WallpaperImportPicker()
   let theme: AppThemeStore
   let appLanguage: AppLanguageStore
@@ -283,6 +285,7 @@ final class PanelController {
     pixiv: PixivStore? = nil,
     updater: SoftwareUpdateStatus? = nil,
     imports: LibraryImportStore? = nil,
+    linkedFolders: LinkedFolderCoordinator? = nil,
     presentation: PanelPresentation? = nil,
     theme: AppThemeStore? = nil,
     displayTitles: DisplayTitleResolver = .system,
@@ -345,6 +348,7 @@ final class PanelController {
     self.pixiv = pixiv
     self.updater = updater ?? SoftwareUpdateStatus()
     self.imports = imports
+    self.linkedFolders = linkedFolders ?? LinkedFolderCoordinator()
     self.theme = theme
     self.appLanguage = appLanguage
     self.playback = playback
@@ -469,6 +473,11 @@ final class PanelController {
     ) { [weak self] _ in
       MainActor.assumeIsolated { self?.userShortcutsRevision &+= 1 }
     }
+    // Removing a wallpaper whose file left a linked folder forgets it as Delete does, which
+    // needs the panel: removals found while it was closed run now.
+    linkedFolders.remover = { [weak self] ids, destinations, stillDue in
+      try await self?.removeLinkedFolderWallpapers(ids, destinations: destinations, stillDue: stillDue) ?? []
+    }
     refreshVisibilityGatedWork()
   }
 
@@ -487,6 +496,7 @@ final class PanelController {
     storageMetricsTask?.cancel()
     storageMetricsTask = nil
     storageHealthModel?.cancelScan()
+    linkedFolders.remover = nil
     if let favoritesObserver { NotificationCenter.default.removeObserver(favoritesObserver) }
     favoritesObserver = nil
     if let userShortcutsObserver { NotificationCenter.default.removeObserver(userShortcutsObserver) }

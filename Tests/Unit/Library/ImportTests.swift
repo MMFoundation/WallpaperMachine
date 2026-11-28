@@ -68,6 +68,125 @@ final class ImportTests: XCTestCase {
         XCTAssertEqual(report.failures.count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: library.appendingPathComponent("escape").path))
     }
+
+    func testNewLinkedImportCannotRepairOrClaimAnExistingDirectory() async throws {
+        let source = try project("Ocean")
+        let destination = library.appendingPathComponent("Ocean")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        let manifest = destination.appendingPathComponent("project.json")
+        let unique = destination.appendingPathComponent("notes.txt")
+        try Data("invalid json".utf8).write(to: manifest)
+        try Data("only copy".utf8).write(to: unique)
+        let report = try await importer.importItems([source], into: library, duplicates: .replaceChanged,
+                                                    linked: .init(replacingOwned: [:], expectedIDs: ["Ocean": "Ocean"])) { _ in }
+        XCTAssertEqual(report.skipped, ["Ocean"])
+        XCTAssertTrue(report.linkedDestinations.isEmpty)
+        XCTAssertEqual(try String(contentsOf: unique, encoding: .utf8), "only copy")
+        XCTAssertEqual(try String(contentsOf: manifest, encoding: .utf8), "invalid json")
+    }
+
+    func testLinkedImportReturnsOnlyTheDirectoryItCreatedOrVerified() async throws {
+        let source = try project("Ocean")
+        let destination = library.appendingPathComponent("Ocean")
+        var link = WallpaperImportService.LinkedImport(replacingOwned: [:], expectedIDs: ["Ocean": "Ocean"])
+        let first = try await importer.importItems([source], into: library, duplicates: .replaceChanged, linked: link) { _ in }
+        let original = try XCTUnwrap(first.linkedDestinations["Ocean"])
+        XCTAssertEqual(LinkedFolderDestinationIdentity.read(destination), original)
+        let unowned = try await importer.importItems([source], into: library, duplicates: .replaceChanged, linked: link) { _ in }
+        XCTAssertTrue(unowned.linkedDestinations.isEmpty)
+        link.replacingOwned = ["Ocean": original]
+        let identical = try await importer.importItems([source], into: library, duplicates: .replaceChanged, linked: link) { _ in }
+        XCTAssertEqual(identical.identical, ["Ocean"])
+        XCTAssertEqual(identical.linkedDestinations, link.replacingOwned)
+        try Data("changed".utf8).write(to: source.appendingPathComponent("movie.mp4"))
+        let changed = try await importer.importItems([source], into: library, duplicates: .replaceChanged, linked: link) { _ in }
+        XCTAssertEqual(changed.replacedIDs, ["Ocean"])
+        let updated = try XCTUnwrap(changed.linkedDestinations["Ocean"])
+        XCTAssertNotEqual(original, updated)
+        XCTAssertEqual(LinkedFolderDestinationIdentity.read(destination), updated)
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("movie.mp4"), encoding: .utf8), "changed")
+    }
+
+    func testChangedManifestCannotUseAnotherSourcesReplacementAuthorization() async throws {
+        let other = try project("123456")
+        _ = try await importOne(other)
+        let installed = library.appendingPathComponent("123456")
+        let identity = try XCTUnwrap(LinkedFolderDestinationIdentity.read(installed))
+        let source = try project("Ocean")
+        try Data(#"{"type":"video","file":"movie.mp4","workshopid":"123456"}"#.utf8)
+            .write(to: source.appendingPathComponent("project.json"))
+        let report = try await importer.importItems([source], into: library, duplicates: .replaceChanged,
+                                                    linked: .init(replacingOwned: ["123456": identity],
+                                                                  expectedIDs: ["Ocean": "Ocean"])) { _ in }
+        XCTAssertTrue(report.importedIDs.isEmpty)
+        XCTAssertTrue(report.linkedDestinations.isEmpty)
+        XCTAssertEqual(report.failures.count, 1)
+        XCTAssertEqual(LinkedFolderDestinationIdentity.read(installed), identity)
+    }
+
+    func testLinkedImportRechecksTheOwnedDirectoryAfterPreparingTheReplacement() async throws {
+        let source = root.appendingPathComponent("Rain.mp4")
+        try Data("new content".utf8).write(to: source)
+        let installed = library.appendingPathComponent("local-Rain.mp4")
+        let prior = root.appendingPathComponent("old directory")
+        try FileManager.default.createDirectory(at: installed, withIntermediateDirectories: true)
+        try Data(#"{"type":"video","file":"Rain.mp4"}"#.utf8).write(to: installed.appendingPathComponent("project.json"))
+        try Data("old content".utf8).write(to: installed.appendingPathComponent("Rain.mp4"))
+        let identity = try XCTUnwrap(LinkedFolderDestinationIdentity.read(installed))
+        let importer = WallpaperImportService(poster: { _, _ in
+            try FileManager.default.moveItem(at: installed, to: prior)
+            try FileManager.default.copyItem(at: prior, to: installed)
+            try Data("someone else's copy".utf8).write(to: installed.appendingPathComponent("Rain.mp4"))
+            return Data()
+        })
+        let report = try await importer.importItems([source], into: library, duplicates: .replaceChanged,
+                                                    linked: .init(replacingOwned: ["local-Rain.mp4": identity],
+                                                                  expectedIDs: ["Rain.mp4": "local-Rain.mp4"])) { _ in }
+        XCTAssertEqual(report.skipped, ["Rain.mp4"])
+        XCTAssertTrue(report.linkedDestinations.isEmpty)
+        XCTAssertEqual(try String(contentsOf: installed.appendingPathComponent("Rain.mp4"), encoding: .utf8), "someone else's copy")
+    }
+
+    func testNewLinkedImportCannotClaimADirectoryAddedDuringTheCopy() async throws {
+        let source = root.appendingPathComponent("Rain.mp4")
+        try Data("linked content".utf8).write(to: source)
+        let installed = library.appendingPathComponent("local-Rain.mp4")
+        let importer = WallpaperImportService(poster: { _, _ in
+            try FileManager.default.createDirectory(at: installed, withIntermediateDirectories: false)
+            try Data("someone else's copy".utf8).write(to: installed.appendingPathComponent("Rain.mp4"))
+            return Data()
+        })
+        let report = try await importer.importItems([source], into: library, duplicates: .replaceChanged,
+                                                    linked: .init(replacingOwned: [:], expectedIDs: ["Rain.mp4": "local-Rain.mp4"])) { _ in }
+        XCTAssertEqual(report.skipped, ["Rain.mp4"])
+        XCTAssertTrue(report.linkedDestinations.isEmpty)
+        XCTAssertEqual(try String(contentsOf: installed.appendingPathComponent("Rain.mp4"), encoding: .utf8), "someone else's copy")
+    }
+
+    @MainActor
+    func testShutdownDeliversLinkedCopyIdentityWhileRendererRefreshIsSuspended() async throws {
+        let source = try project("Ocean")
+        let store = LibraryImportStore(importer: importer, library: library)
+        let settling = expectation(description: "Renderer refresh started")
+        let returned = expectation(description: "Linked import received the published directory")
+        var finishRefresh: CheckedContinuation<Void, Never>?
+        store.refreshLibrary = {
+            await withCheckedContinuation { continuation in
+                finishRefresh = continuation
+                settling.fulfill()
+            }
+        }
+        let waiting = Task {
+            defer { returned.fulfill() }
+            return try await store.importAndWait([source], replacingOwned: [:], expectedIDs: ["Ocean": "Ocean"])
+        }
+        await fulfillment(of: [settling], timeout: 5)
+        await store.shutdown()
+        await fulfillment(of: [returned], timeout: 5)
+        finishRefresh?.resume()
+        let report = try await waiting.value
+        XCTAssertEqual(try XCTUnwrap(report.linkedDestinations["Ocean"]), LinkedFolderDestinationIdentity.read(library.appendingPathComponent("Ocean")))
+    }
     func testSymlinkContentIsRejectedWithoutPartialCommit() async throws {
         let source = try project("link")
         try FileManager.default.createSymbolicLink(at: source.appendingPathComponent("outside"), withDestinationURL: root)

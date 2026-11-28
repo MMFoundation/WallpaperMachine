@@ -64,6 +64,44 @@ extension PanelController {
     }
   }
 
+  /// The same removal as `deleteMany`, without asking, for wallpapers whose files left a linked
+  /// folder with Mirror deletions on (`LinkedFolderCoordinator`); a large share was already
+  /// confirmed in Settings. `stillDue` is asked in the command queue's turn, just before
+  /// anything moves, and only ids it still names are removed. Ids no longer installed count as
+  /// removed. Answers the removed ids; one that could not be moved stays due.
+  func removeLinkedFolderWallpapers(
+    _ ids: [String], destinations: [String: LinkedFolderDestinationIdentity],
+    stillDue: @escaping @MainActor () -> Set<String>
+  ) async throws -> [String] {
+    var removed: [String] = []
+    try await store.commands.run(choosing: deletionDisplaySlots) {
+      let current = stillDue()
+      let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
+      let wanted = ids.filter(current.contains)
+      removed = wanted.filter { !installed.contains($0) }
+      var due: [String] = []
+      for id in wanted.filter(installed.contains).prefix(Self.batchLimit) {
+        guard let expected = destinations[id] else { removed.append(id); continue }
+        guard let actual = LinkedFolderDestinationIdentity.read(ClientPaths.libraryURL.appendingPathComponent(id)) else { continue }
+        if actual == expected { due.append(id) } else { removed.append(id) }
+      }
+      guard !due.isEmpty else { return }
+      let report = try await store.deleteWallpapersAsync(ids: due) { url in
+        let id = url.lastPathComponent
+        guard stillDue().contains(id), let expected = destinations[id],
+              LinkedFolderDestinationIdentity.read(url) == expected else { throw CancellationError() }
+        try recycleWallpaperFolder(url)
+      }
+      removed += report.deleted
+      try await forgetLibraryMetadata(report.deleted)
+      for failure in report.failures {
+        AppLog.warn("linked folders: could not move \(failure.id) to Trash: \(failure.error.localizedDescription)")
+      }
+      if let error = report.playbackError { throw error }
+    }
+    return removed
+  }
+
   /// Deletion can affect every independent display. Automatic choices give way while its
   /// ejections and replacements run; a later user choice still runs after the deletion.
   private var deletionDisplaySlots: [String] {

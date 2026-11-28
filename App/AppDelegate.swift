@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private(set) lazy var workshopStore = WorkshopStore()
     private lazy var pixivStore = PixivStore()
     private lazy var libraryImports = LibraryImportStore()
+    /// The folders of the user's own wallpapers the library follows (docs/features/linked-folders.md).
+    private lazy var linkedFolders = LinkedFolderCoordinator()
     /// Files handed to the app before it finished launching, imported once it has.
     private var pendingOpenedFiles: [URL] = []
     private var finishedLaunching = false
@@ -1591,6 +1593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         [
             .init(name: "services") { [self] in tearDownServices(restoringDesktop: false) },
             .init(name: "imports") { [self] in await libraryImports.shutdown() },
+            .init(name: "links") { [self] in await linkedFolders.shutdown() },
             .init(name: "steamcmd") { [self] in await workshopStore.steamCMDSetup.shutdown() },
             .init(name: "workshop") { [self] in await workshopStore.downloader.shutdown() },
             .init(name: "pixiv") { [self] in await pixivStore.downloads.shutdown() },
@@ -1612,6 +1615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// the sync go; `applicationWillTerminate` restores it in the place it always has.
     private func tearDownServices(restoringDesktop: Bool) {
         libraryDrive?.stop()
+        linkedFolders.stop()
         globalHotKeys?.stop()
         presentationMode?.restoreMuteForTermination()
         presentationMode = nil
@@ -2102,7 +2106,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if let store {
             return AnyView(ControlPanelView(
                 store: store, navigation: controlPanelNavigation, workshop: workshopStore,
-                pixiv: pixivStore, updater: updates.status, imports: libraryImports))
+                pixiv: pixivStore, updater: updates.status, imports: libraryImports,
+                linkedFolders: linkedFolders))
         }
         let error = startupError ?? lastError
         return AnyView(BridgeUnavailableView(
@@ -2481,6 +2486,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             } catch {
                 AppLog.warn("storage: the library could not be read again after its drive returned: \(error.localizedDescription)")
             }
+            // What changed in a linked folder while the library was away is imported now.
+            self?.linkedFolders.reconcileAll()
         }
         monitor.onChange = { [weak self] in
             guard let self, !self.shutdownInProgress, !self.shutdownComplete else { return }
@@ -2526,6 +2533,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Follows the linked folders once the library has been read: imports what they gained and
+    /// removes what they lost while the app was not running, then watches them. Imports go through
+    /// the app's import store, as a drop on the Dock icon does; nothing is imported or removed
+    /// while the library's drive is away.
+    private func startLinkedFolders() {
+        guard let store, !shutdownInProgress, !shutdownComplete else { return }
+        linkedFolders.installedIDs = { [weak self, weak store] in
+            guard let store, store.libraryLoadState == .loaded, self?.libraryDrive?.stopsWallpapers != true else { return nil }
+            return Set(store.librarySnapshot.wallpapers.map(\.id))
+        }
+        linkedFolders.importer = { [weak self] urls, replacing, expected in
+            guard let self, !self.shutdownInProgress else { throw CancellationError() }
+            return try await self.libraryImports.importAndWait(urls, replacingOwned: replacing, expectedIDs: expected)
+        }
+        linkedFolders.start()
+    }
+
     private func bootstrapStore() {
         AppLog.info("startup: bootstrapAsync start")
         guard let store else {
@@ -2550,6 +2574,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 displayTopologyAutoApplier?.seedTopology()
                 publishAutomationStatus()
                 checkWorkshopUpdatesIfDue()
+                startLinkedFolders()
                 // Links, keyboard shortcuts and the Shortcuts app act from here on.
                 AppAutomation.shared.handler = { [weak self] command in
                     guard let self else { throw AutomationError.notReady }
