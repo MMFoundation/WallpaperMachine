@@ -1,6 +1,21 @@
 import Darwin
 import Foundation
 
+struct LinkedFolderDestinationIdentity: Codable, Equatable, Sendable {
+    let volume: String
+    let file: UInt64
+    let birthSeconds: Int64
+    let birthNanoseconds: Int64
+
+    static func read(_ directory: URL) -> Self? {
+        var info = stat()
+        guard lstat(directory.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+              let volume = try? directory.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString else { return nil }
+        return Self(volume: volume, file: UInt64(info.st_ino), birthSeconds: Int64(info.st_birthtimespec.tv_sec),
+                    birthNanoseconds: Int64(info.st_birthtimespec.tv_nsec))
+    }
+}
+
 /// Copies user imports non-destructively and adopts validated private Steam downloads.
 actor WallpaperImportService {
     enum DuplicatePolicy: String, CaseIterable, Identifiable, Sendable {
@@ -26,6 +41,12 @@ actor WallpaperImportService {
         /// Folders whose name is not a Workshop id but whose manifest names the item they are
         /// a copy of: folder name to item id. They are filed under that id.
         var recognizedWorkshopIDs: [String: String] = [:]
+        var linkedDestinations: [String: LinkedFolderDestinationIdentity] = [:]
+    }
+
+    struct LinkedImport: Sendable {
+        var replacingOwned: [String: LinkedFolderDestinationIdentity]
+        var expectedIDs: [String: String]
     }
 
     struct ImportError: LocalizedError {
@@ -64,8 +85,12 @@ actor WallpaperImportService {
     /// filed under that item's id.
     nonisolated static func libraryID(forSourceAt source: URL, isDirectory: Bool) -> String? {
         let name = source.lastPathComponent
-        if isDirectory, workshopID(name) == nil, let inferred = inferredWorkshopID(of: source) { return inferred }
+        if isDirectory { return projectID(named: name, manifestAt: source) }
         return libraryID(forSourceNamed: name, isDirectory: isDirectory)
+    }
+
+    nonisolated private static func projectID(named name: String, manifestAt folder: URL) -> String {
+        workshopID(name) == nil ? inferredWorkshopID(of: folder) ?? name : name
     }
     nonisolated static let stagingPrefix = ".WallpaperMachine-import-"
     nonisolated static let stagingOwnerName = ".owner"
@@ -90,7 +115,7 @@ actor WallpaperImportService {
     }
 
     func importItems(
-        _ sources: [URL], into library: URL, duplicates: DuplicatePolicy,
+        _ sources: [URL], into library: URL, duplicates: DuplicatePolicy, linked: LinkedImport? = nil,
         progress: @Sendable (String) async -> Void
     ) async throws -> Report {
         let fm = FileManager.default
@@ -121,14 +146,14 @@ actor WallpaperImportService {
             defer { if scoped { source.stopAccessingSecurityScopedResource() } }
             do {
                 try Task.checkCancellation()
-                for candidate in try discover(source) {
+                for candidate in try (linked == nil ? discover(source) : [source]) {
                     try Task.checkCancellation()
                     guard seen.insert(candidate.resolvingSymlinksInPath().standardizedFileURL.path).inserted else { continue }
                     let name = candidate.lastPathComponent
                     await progress(String(localized: "Importing \(name)…"))
                     do {
                         try await importCandidate(candidate, into: managed, staging: staging,
-                                                  duplicates: duplicates, report: &report)
+                                                  duplicates: duplicates, linked: linked, report: &report)
                     } catch is CancellationError {
                         throw CancellationError()
                     } catch {
@@ -156,7 +181,7 @@ actor WallpaperImportService {
     /// Imports one candidate into `library`, recording the outcome in `report`. Throws what stops
     /// this candidate; the caller turns that into a failure line and carries on.
     private func importCandidate(
-        _ candidate: URL, into library: URL, staging: URL, duplicates: DuplicatePolicy, report: inout Report
+        _ candidate: URL, into library: URL, staging: URL, duplicates: DuplicatePolicy, linked: LinkedImport?, report: inout Report
     ) async throws {
         let fm = FileManager.default
         let name = candidate.lastPathComponent
@@ -165,17 +190,18 @@ actor WallpaperImportService {
             throw ImportError(message: String(localized: "Choose a source outside WallpaperMachine’s managed library."))
         }
 
-        let isDirectory = try downloadMetadata(at: candidate).st_mode & S_IFMT == S_IFDIR
+        let mode = try downloadMetadata(at: candidate).st_mode & S_IFMT
+        if mode == S_IFLNK {
+            throw ImportError(message: String(localized: "Symbolic links are not imported. Choose the original folder or file instead."))
+        }
+        if linked != nil, mode != S_IFDIR, mode != S_IFREG { throw POSIXError(.ESTALE) }
+        let isDirectory = mode == S_IFDIR
         let ext = candidate.pathExtension.lowercased()
         let kind: CandidateKind
         var id = name
         if isDirectory {
             kind = .project
-            if Self.workshopID(name) == nil, let inferred = Self.inferredWorkshopID(of: candidate) {
-                id = inferred
-                report.recognizedWorkshopIDs[name] = inferred
-                AppLog.info("import: \(name) is a copy of Workshop item \(inferred); filing it under that id")
-            }
+            id = Self.projectID(named: name, manifestAt: candidate)
         } else if Self.imageExtensions.contains(ext) {
             kind = .image(ext)
             id = Self.imageIDPrefix + name
@@ -191,17 +217,32 @@ actor WallpaperImportService {
         guard !id.contains("/"), isSafeRelativePath(id) else {
             throw ImportError(message: String(localized: "The folder name cannot be used as a library identifier."))
         }
+        if let linked, linked.expectedIDs[name] != id { throw POSIXError(.ESTALE) }
+        if isDirectory, name != id {
+            report.recognizedWorkshopIDs[name] = id
+            AppLog.info("import: \(name) is a copy of Workshop item \(id); filing it under that id")
+        }
 
         var destination = library.appendingPathComponent(id, isDirectory: true)
+        let authorized = linked?.replacingOwned[id]
         var replacing = false
         if (try? downloadMetadata(at: destination)) != nil {
+            if linked != nil, authorized == nil || authorized != LinkedFolderDestinationIdentity.read(destination) {
+                report.skipped.append(name)
+                return
+            }
             var imageExtension: String?
             if case .image(let kept) = kind { imageExtension = kept }
             switch try resolveDuplicate(duplicates, candidate: candidate, isDirectory: isDirectory,
                                         imageExtension: imageExtension, installed: destination) {
             case .skip(let identical):
                 report.skipped.append(name)
-                if identical { report.identical.append(name) }
+                if identical {
+                    report.identical.append(name)
+                    if let authorized, LinkedFolderDestinationIdentity.read(destination) == authorized {
+                        report.linkedDestinations[id] = authorized
+                    }
+                }
                 return
             case .keepBoth:
                 id += "-" + UUID().uuidString
@@ -209,6 +250,9 @@ actor WallpaperImportService {
             case .replace:
                 replacing = true
             }
+        } else if authorized != nil {
+            report.skipped.append(name)
+            return
         }
 
         let built = staging.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -244,15 +288,38 @@ actor WallpaperImportService {
 
         try validateProject(at: built)
         try Task.checkCancellation()
+        if linked != nil, isDirectory, Self.projectID(named: name, manifestAt: built) != id {
+            throw POSIXError(.ESTALE)
+        }
+        let publishedIdentity: LinkedFolderDestinationIdentity?
+        if linked != nil {
+            guard let identity = LinkedFolderDestinationIdentity.read(built) else { throw POSIXError(.ESTALE) }
+            publishedIdentity = identity
+        } else {
+            publishedIdentity = nil
+        }
         if replacing {
             try requireInstalledProject(destination)
+            if let authorized, LinkedFolderDestinationIdentity.read(destination) != authorized {
+                report.skipped.append(name)
+                return
+            }
             let code = Self.exchange(built, with: destination)
             guard code == 0 else { throw Self.replaceFailure(id, String(cString: strerror(code)) + ".") }
             report.replacedIDs.append(id)
             AppLog.info("import: replaced \(id) with the imported copy")
+        } else if linked != nil {
+            guard renamex_np(built.path, destination.path, UInt32(RENAME_EXCL)) == 0 else {
+                if errno == EEXIST {
+                    report.skipped.append(name)
+                    return
+                }
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
         } else {
             try fm.moveItem(at: built, to: destination)
         }
+        report.linkedDestinations[id] = publishedIdentity
         report.importedIDs.append(id)
     }
 

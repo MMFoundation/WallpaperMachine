@@ -14,6 +14,7 @@ struct LinkedFolder: Codable, Equatable, Identifiable, Sendable {
     /// Off by default: a file deleted from the folder leaves its wallpaper in the library.
     var mirrorsDeletions: Bool
     var record: LinkedFolderRecord
+    var destinations: [String: LinkedFolderDestinationIdentity]?
 
     init(id: UUID = UUID(), path: String, bookmark: Data? = nil, mirrorsDeletions: Bool = false,
          record: LinkedFolderRecord = LinkedFolderRecord()) {
@@ -36,6 +37,8 @@ struct LinkedFolderRecord: Codable, Equatable, Sendable {
             /// The file left the folder while Mirror deletions was off, or the user chose to keep
             /// its wallpaper: the wallpaper stays and is never removed for it later.
             case missing
+            /// The file left, but removing its wallpaper is waiting for the user's decision.
+            case held
             /// The file left the folder with Mirror deletions on: its wallpaper is due to be
             /// removed. The entry is kept until it is, so a file that comes back (under its name or,
             /// renamed, under its file id) is recognised and its removal called off.
@@ -68,9 +71,10 @@ struct LinkedFolderRecord: Codable, Equatable, Sendable {
     /// Library items due to be removed that no file stands for any more: the item a renamed and
     /// changed file was imported anew from.
     var pendingRemovals: [String] = []
-    /// Replaced items held for the user's go-ahead: one import batch replaced enough of the
-    /// link's wallpapers that removing the old ones counts as a mass removal.
+    /// Replaced items held for the user's go-ahead along with any held departures.
     var heldRemovals: [String] = []
+    /// The pending replacements the user already approved; absent in older records.
+    var confirmedReplacements: Set<String>?
 }
 
 /// A file's size and modification time, enough to tell that it changed or is still being written.

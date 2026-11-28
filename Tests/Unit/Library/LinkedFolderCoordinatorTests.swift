@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import XCTest
 
 @testable import WallpaperMachine
@@ -28,12 +29,26 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
   }
 
   private final class FakeWatcher: DirectoryWatching {
-    func stop() {}
+    let stopped: AsyncGate?
+    init(stopped: AsyncGate? = nil) { self.stopped = stopped }
+    func stop() { stopped?.open() }
+  }
+
+  private struct GatedStore: LinkedFolderStoring {
+    let backing: LinkedFolderStore
+    let gate: AsyncGate
+    let block: @Sendable ([LinkedFolder]) -> Bool
+    var file: URL { backing.file }
+    func load() throws -> [LinkedFolder] { try backing.load() }
+    func save(_ folders: [LinkedFolder]) async throws {
+      if block(folders) { await gate.wait() }
+      try backing.save(folders)
+    }
   }
 
   /// A remover that removes whatever is still due when its turn comes, as the panel's does.
-  private func remover(_ log: @escaping @MainActor ([String]) -> Void) -> @MainActor ([String], @escaping @MainActor () -> Set<String>) async throws -> [String] {
-    { [unowned self] ids, stillDue in
+  private func remover(_ log: @escaping @MainActor ([String]) -> Void) -> @MainActor ([String], [String: LinkedFolderDestinationIdentity], @escaping @MainActor () -> Set<String>) async throws -> [String] {
+    { [unowned self] ids, _, stillDue in
       let due = ids.filter(stillDue().contains)
       log(due)
       installed.subtract(due)
@@ -50,6 +65,7 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
   private var duringImport: (@MainActor () async throws -> Void)?
   private var installed: Set<String> = []
   private var coordinator: LinkedFolderCoordinator!
+  private let watcherStopped = AsyncGate()
 
   override func setUp() async throws {
     root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -66,18 +82,19 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
       scanner: scanner, watch: { [unowned self] url, onChange in
         watched.append(url.lastPathComponent)
         changeHandlers[url.lastPathComponent] = onChange
-        return FakeWatcher()
+        return FakeWatcher(stopped: watcherStopped)
       },
       sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
       notifications: NotificationCenter())
     coordinator.installedIDs = { [unowned self] in installed }
-    coordinator.importer = { [unowned self] urls in
+    coordinator.importer = { [unowned self] urls, _, _ in
       imported.append(urls.map(\.lastPathComponent))
       try await duringImport?()
       var report = WallpaperImportService.Report()
       for url in urls {
         let id = WallpaperImportService.libraryID(forSourceNamed: url.lastPathComponent, isDirectory: false)!
         report.importedIDs.append(id)
+        report.linkedDestinations[id] = try XCTUnwrap(LinkedFolderDestinationIdentity.read(root))
         installed.insert(id)
       }
       return report
@@ -114,6 +131,73 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
     await coordinator.waitForIdle()
   }
 
+  func testUnlinkSurvivesAReconcileThatCommitsDuringTheSave() async throws {
+    let gate = AsyncGate()
+    let backing = LinkedFolderStore(file: root.appendingPathComponent("LinkedFolders.json"))
+    coordinator = LinkedFolderCoordinator(
+      store: GatedStore(backing: backing, gate: gate, block: { $0.isEmpty }),
+      scanner: scanner, watch: { _, _ in FakeWatcher() },
+      sleep: { _ in try await Task.sleep(for: .seconds(3600)) }, notifications: NotificationCenter())
+    coordinator.installedIDs = { [] }
+    scanner.next = contents([])
+    let id = try await link()
+    let unlink = Task { try await coordinator.unlink(id) }
+    await gate.waitUntilWaiting()
+
+    let recorded = expectation(description: "scan records the newly arrived file")
+    withObservationTracking { _ = coordinator.folders } onChange: { recorded.fulfill() }
+    scanner.next = contents(["rain.mp4"])
+    coordinator.reconcileAll()
+    await fulfillment(of: [recorded], timeout: 3)
+    XCTAssertNotNil(coordinator.folders.first?.record.pending["rain.mp4"])
+    gate.open()
+    try await unlink.value
+    await coordinator.waitForIdle()
+    XCTAssertTrue(try backing.load().isEmpty)
+  }
+
+  func testConcurrentAddsLeaveOnlyOneLink() async throws {
+    let gate = AsyncGate()
+    let backing = LinkedFolderStore(file: root.appendingPathComponent("LinkedFolders.json"))
+    let links = LinkedFolderCoordinator(
+      store: GatedStore(backing: backing, gate: gate, block: { !$0.isEmpty }),
+      scanner: scanner, watch: { _, _ in FakeWatcher() }, notifications: NotificationCenter())
+    let source = root.appendingPathComponent("Folder")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    let library = root.appendingPathComponent("Library")
+    let support = root.appendingPathComponent("Support")
+    let first = Task { try await links.add(source, library: library, support: support) }
+    await gate.waitUntilWaiting()
+    let second = Task { try await links.add(source, library: library, support: support) }
+    gate.open()
+    let link = try await first.value
+    do {
+      _ = try await second.value
+      XCTFail("the same folder was linked twice")
+    } catch is WallpaperActionError {}
+    XCTAssertEqual(try backing.load().map(\.id), [link.id])
+  }
+
+  func testShutdownReturnsWithTheInFlightImportsOwnershipOnDisk() async throws {
+    scanner.next = contents(["rain.mp4"])
+    _ = try await link()
+    let settling = AsyncGate()
+    duringImport = { await settling.wait() }
+    coordinator.reconcileAll()
+    await settling.waitUntilWaiting()
+
+    let store = LinkedFolderStore(file: root.appendingPathComponent("LinkedFolders.json"))
+    let shutdown = Task {
+      await coordinator.shutdown()
+      return try store.load().first?.record.entries.first
+    }
+    await watcherStopped.wait()
+    settling.open()
+    let entry = try await shutdown.value
+    XCTAssertEqual(entry?.libraryID, "local-rain.mp4")
+    XCTAssertEqual(entry?.owned, true)
+  }
+
   func testFileIsImportedAtTheSecondLookAndRemembered() async throws {
     scanner.next = contents(["rain.mp4"])
     _ = try await link()
@@ -126,6 +210,15 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
 
     let reloaded = try LinkedFolderStore(file: root.appendingPathComponent("LinkedFolders.json")).load()
     XCTAssertEqual(reloaded.first?.record.entries.map(\.libraryID), ["local-rain.mp4"])
+  }
+
+  func testImportSetupFailureIsReportedInsteadOfTreatedAsBusy() async throws {
+    scanner.next = contents(["rain.mp4"])
+    let id = try await link()
+    duringImport = { throw CocoaError(.fileWriteNoPermission) }
+    await look()
+    XCTAssertNotNil(coordinator.status(of: id).failure)
+    XCTAssertTrue(installed.isEmpty)
   }
 
   func testRemovalWaitsForThePanelThenRuns() async throws {
@@ -255,7 +348,7 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
     await look()
 
     var removed: [[String]] = []
-    coordinator.remover = { [unowned self] ids, stillDue in
+    coordinator.remover = { [unowned self] ids, _, stillDue in
       scanner.next = contents(["a.mp4", "b.mp4", "c.mp4", "d.mp4", "e.mp4"])
       changeHandlers["Folder"]?()
       let due = ids.filter(stillDue().contains)

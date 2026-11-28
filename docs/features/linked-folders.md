@@ -60,7 +60,8 @@ placeholder): a recorded file is taken for deleted only when its name is gone.
   goes through `LibraryImportStore` with **Replace if changed**, shows as any import does in
   the toolbar, and its ids follow the import's rules (`local-<name>`, `image-<name>`, a
   project's folder name or recognized Workshop id). A file whose import failed is not tried
-  again until it changes. While another import runs, the link waits for it.
+  again until it changes. While another import runs, the link waits for it. If the library
+  itself cannot be written, the error appears in Settings; the link does not poll a failing disk.
 - **A renamed file** (the same file id under another name) keeps its wallpaper, favorites and
   playlist entries. A file renamed and changed is imported under its new name's id; with
   Mirror deletions on, the item under the old name is removed in the same look. A rename onto
@@ -70,11 +71,12 @@ placeholder): a recorded file is taken for deleted only when its name is gone.
   take its place on displays, and its favorites, playlist entries, collections, presets and the
   rest are forgotten). With it off, the wallpaper stays and the folder's row counts it as kept
   after leaving the folder. Turning the switch on later does not remove those.
-- **Only what the link imported** is ever replaced or removed. A file whose id is already
-  installed (a Workshop item, a hand import, another link's, or the same name in other case on
-  a library volume that ignores case) is recorded and left alone, in the library and in the
-  folder. The library is read after each scan, just before the import starts, and an import
-  that still lands on a wallpaper that was there before is not made the link's. Ids are
+- **Only what the link imported** is ever replaced or removed. The link records the identity
+  of the managed directory when it publishes a copy. A new import cannot overwrite an existing
+  destination, even one the library scan did not recognize. Before replacing or trashing a
+  copy, the app checks its identity again. If you delete a wallpaper and hand-import a new
+  one under the same name, that new copy, its favorites and its playlists are left alone.
+  An already installed Workshop item, hand import or another link's copy is left alone. Ids are
   compared without case throughout: a file renamed only in case keeps its wallpaper, and on a
   case-sensitive library volume a file whose name differs only in case from an installed
   wallpaper is left for a hand import rather than risk claiming the other one.
@@ -106,11 +108,14 @@ keeps every wallpaper still due. A batch cut at the panel's limit (4,096) goes o
 - A folder that is missing, unreadable, in the Trash, or on a disk that is not connected
   changes nothing. Its row says so, and the link waits for it to come back.
 - A name the folder still lists is never taken for deleted, whether or not it can be read.
+  If iCloud has evicted a file inside a project, the installed copy is kept until the
+  complete source is available again. The Trash on an external volume is also ignored.
 - More than 20 removals at once, or more than a quarter of the link's wallpapers (a single
   file is never held), are not applied: the folder's row asks **Move to Trash** (confirmed
   again) or **Keep**, which keeps them and does not ask about them again. Removals decided one
-  at a time while the panel was closed are counted together. Confirming removes only the
-  wallpapers the confirmation counted; any that left while it was open are asked about next.
+  at a time while the panel was closed are counted together, including old copies left by
+  renames with edits. Confirming removes only the wallpapers the confirmation counted;
+  any that left while it was open are asked about next.
 - Nothing is imported or removed while the library's drive is away.
 - **Unlink** stops following the folder; what it imported stays in the library.
 

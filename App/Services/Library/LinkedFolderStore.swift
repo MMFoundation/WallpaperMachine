@@ -1,7 +1,13 @@
 import Foundation
 
+protocol LinkedFolderStoring: Sendable {
+    var file: URL { get }
+    func load() throws -> [LinkedFolder]
+    func save(_ folders: [LinkedFolder]) async throws
+}
+
 /// Keeps the linked folders and their records in `LinkedFolders.json` in the app-support folder.
-struct LinkedFolderStore: Sendable {
+struct LinkedFolderStore: LinkedFolderStoring {
     private struct File: Codable {
         var version = 1
         var folders: [LinkedFolder]

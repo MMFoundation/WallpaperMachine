@@ -65,4 +65,34 @@ final class LinkedFolderScannerTests: XCTestCase {
     XCTAssertEqual(contents.items, [])
     XCTAssertTrue(contents.present.contains("Ocean"))
   }
+
+  func testEvictedNestedAssetKeepsTheCompleteInstalledProject() throws {
+    let url = try project("Ocean")
+    let nested = url.appendingPathComponent("assets")
+    try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+    let asset = nested.appendingPathComponent("ocean.png")
+    try Data([1]).write(to: asset)
+    let before = try contents()
+    let item = try XCTUnwrap(before.items.first)
+    var record = LinkedFolderRecord(entries: [.init(path: item.path, libraryID: item.libraryID, stamp: item.stamp,
+                                                    fileID: item.fileID, owned: true)])
+    try FileManager.default.moveItem(at: asset, to: nested.appendingPathComponent(".ocean.png.icloud"))
+    for _ in 0..<2 {
+      let scan = try contents()
+      XCTAssertEqual(scan.items, [])
+      XCTAssertTrue(scan.present.contains("Ocean"))
+      let plan = LinkedFolderPlanner.plan(record: record, scan: .contents(scan), mirrorsDeletions: true, installed: ["Ocean"])
+      XCTAssertEqual(plan.imports, [])
+      XCTAssertEqual(plan.removals, [])
+      record = plan.record
+    }
+    try FileManager.default.moveItem(at: nested.appendingPathComponent(".ocean.png.icloud"), to: asset)
+    XCTAssertEqual(try contents().items.map(\.libraryID), ["Ocean"])
+  }
+
+  func testExternalVolumeTrashIsUnavailableEvenWhenReadable() throws {
+    let trashed = folder.appendingPathComponent(".Trashes/501/Ocean")
+    try FileManager.default.createDirectory(at: trashed, withIntermediateDirectories: true)
+    XCTAssertEqual(LinkedFolderScanner.scanNow(at: trashed), .unavailable)
+  }
 }

@@ -30,12 +30,12 @@ final class LinkedFolderCoordinator {
     @ObservationIgnored var installedIDs: (@MainActor () -> Set<String>?)?
     /// Imports files with `.replaceChanged` and answers the report once the library has been
     /// rescanned (`LibraryImportStore.importAndWait`); throws while another import runs.
-    @ObservationIgnored var importer: (@MainActor ([URL]) async throws -> WallpaperImportService.Report)?
+    @ObservationIgnored var importer: (@MainActor ([URL], [String: LinkedFolderDestinationIdentity], [String: String]) async throws -> WallpaperImportService.Report)?
     /// Moves wallpapers to the Trash and forgets them as the panel's Delete does, answering the
     /// ids it removed. Set by an open panel, nil while none is. Just before it removes anything,
     /// in its turn in the command queue, it asks the second argument which of the ids are still
     /// due, so an unlink or Mirror deletions turned off meanwhile removes nothing.
-    @ObservationIgnored var remover: (@MainActor ([String], @escaping @MainActor () -> Set<String>) async throws -> [String])? {
+    @ObservationIgnored var remover: (@MainActor ([String], [String: LinkedFolderDestinationIdentity], @escaping @MainActor () -> Set<String>) async throws -> [String])? {
         didSet {
             // Removals found while no panel was open run now; a folder missing earlier is looked for.
             if remover != nil, folders.contains(where: { $0.record.entries.contains { $0.state == .leaving }
@@ -45,7 +45,7 @@ final class LinkedFolderCoordinator {
         }
     }
 
-    @ObservationIgnored private let store: LinkedFolderStore
+    @ObservationIgnored private let store: any LinkedFolderStoring
     @ObservationIgnored private let scanner: any LinkedFolderScanning
     @ObservationIgnored private let watch: @MainActor (URL, @escaping @MainActor () -> Void) -> (any DirectoryWatching)?
     @ObservationIgnored private let recheckDelay: Duration
@@ -60,6 +60,7 @@ final class LinkedFolderCoordinator {
     @ObservationIgnored private var rechecks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var saving: Task<Void, Error>?
+    @ObservationIgnored private var pendingEdits: [UUID: Int] = [:]
     /// Changes the watcher reported for each folder, so a removal waiting for its turn can tell
     /// that the folder changed meanwhile.
     @ObservationIgnored private var changes: [UUID: UInt64] = [:]
@@ -70,7 +71,7 @@ final class LinkedFolderCoordinator {
     /// A file still being copied is looked at again after `recheckDelay`; only then, if it kept
     /// its size, is it imported.
     init(
-        store: LinkedFolderStore = LinkedFolderStore(),
+        store: any LinkedFolderStoring = LinkedFolderStore(),
         scanner: any LinkedFolderScanning = LinkedFolderScanner(),
         watch: @escaping @MainActor (URL, @escaping @MainActor () -> Void) -> (any DirectoryWatching)? = {
             DirectoryWatcher(url: $0, onChange: $1)
@@ -120,6 +121,7 @@ final class LinkedFolderCoordinator {
     /// never leaves an imported wallpaper without the record that says the link owns it.
     func shutdown() async {
         stop()
+        await worker?.value
         _ = try? await saving?.value
     }
 
@@ -149,11 +151,13 @@ final class LinkedFolderCoordinator {
         let (folder, bookmark) = try await Task.detached(priority: .userInitiated) {
             try Self.validate(chosen, library: library, support: support)
         }.value
-        guard !folders.contains(where: { $0.path == folder.path }) else {
-            throw WallpaperActionError(message: String(localized: "This folder is already linked."))
-        }
         let link = LinkedFolder(path: folder.path, bookmark: bookmark)
-        try await transact { $0.append(link) }
+        try await transact { links in
+            guard !links.contains(where: { $0.path == link.path }) else {
+                throw WallpaperActionError(message: String(localized: "This folder is already linked."))
+            }
+            links.append(link)
+        }
         schedule(link.id)
         return link
     }
@@ -161,7 +165,7 @@ final class LinkedFolderCoordinator {
     /// Stops following a folder. What it imported stays in the library, and nothing it had due
     /// to remove is removed.
     func unlink(_ id: UUID) async throws {
-        try await transact { $0.removeAll { $0.id == id } }
+        try await transact(holdingRemovalsFor: id) { $0.removeAll { $0.id == id } }
         stopWatching(id)
         statuses[id] = nil
         rechecks.removeValue(forKey: id)?.cancel()
@@ -175,7 +179,6 @@ final class LinkedFolderCoordinator {
             if !on { LinkedFolderPlanner.stopMirroring(&$0.record) }
         }
         if !on { statuses[id]?.held = [] }
-        schedule(id)
     }
 
     /// Removes the wallpapers of `ids`, the held ones the user was shown and confirmed; any held
@@ -185,7 +188,6 @@ final class LinkedFolderCoordinator {
         guard !confirmed.isEmpty else { return }
         try await update(id) { LinkedFolderPlanner.confirmHeld(Array(confirmed), in: &$0.record) }
         statuses[id]?.held.removeAll { confirmed.contains($0) }
-        schedule(id)
     }
 
     /// Keeps the held wallpapers in the library; their files are not asked about again.
@@ -193,7 +195,7 @@ final class LinkedFolderCoordinator {
         let held = status(of: id).held
         guard !held.isEmpty else { return }
         try await update(id) { LinkedFolderPlanner.keepHeld(held, in: &$0.record) }
-        statuses[id]?.held = []
+        statuses[id]?.held.removeAll { held.contains($0) }
     }
 
     // MARK: Reconciling
@@ -238,6 +240,11 @@ final class LinkedFolderCoordinator {
         }
         commit(id) { folder in
             folder.record = plan.record
+            if folder.destinations != nil {
+                let tracked = Set(plan.record.entries.filter(\.owned).map(\.libraryID))
+                    .union(plan.record.pendingRemovals).union(plan.record.heldRemovals)
+                folder.destinations = folder.destinations?.filter { tracked.contains($0.key) }
+            }
             if contents.folder.path != folder.path { folder.path = contents.folder.path }
         }
         startWatching(id, at: contents.folder)
@@ -249,45 +256,50 @@ final class LinkedFolderCoordinator {
     private func runImports(
         _ items: [LinkedFolderScan.Item], from folder: URL, installedBefore: Set<String>, for id: UUID
     ) async {
-        guard let importer else { return recheck(id) }
+        guard let importer, let link = folders.first(where: { $0.id == id }) else { return recheck(id) }
+        let expected = Dictionary(uniqueKeysWithValues: items.map { ($0.path, $0.libraryID) })
+        var replacing: [String: LinkedFolderDestinationIdentity] = [:]
+        for entry in link.record.entries where entry.owned {
+            if let target = expected[entry.path], target.lowercased() == entry.libraryID.lowercased() {
+                replacing[target] = link.destinations?[entry.libraryID]
+            }
+        }
         let report: WallpaperImportService.Report
         do {
-            report = try await importer(items.map { folder.appendingPathComponent($0.path) })
-        } catch {
-            // Another import is running: its files are looked at again once it had time to finish.
-            AppLog.info("linked folders: import waits: \(error.localizedDescription)")
+            report = try await importer(items.map { folder.appendingPathComponent($0.path) }, replacing, expected)
+        } catch is LibraryImportStore.Busy {
             return recheck(id)
+        } catch {
+            statuses[id]?.failure = error.localizedDescription
+            AppLog.warn("linked folders: import failed: \(error.localizedDescription)")
+            return
         }
         var notReached = false
         var held: [String] = []
-        let heldDepartures = status(of: id).held.count
         commit(id) { link in
-            let queuedBefore = Set(link.record.pendingRemovals)
             defer {
-                // Old items of renamed and changed files are weighed like departed files' wallpapers.
-                LinkedFolderPlanner.holdReplacements(
-                    link.record.pendingRemovals.filter { !queuedBefore.contains($0) }, alreadyHeld: heldDepartures,
-                    in: &link.record)
-                held = link.record.heldRemovals
+                held = LinkedFolderPlanner.holdMassRemovals(in: &link.record)
             }
             for item in items {
                 switch LinkedFolderPlanner.outcome(of: item, in: report) {
                 case .imported(let libraryID):
-                    LinkedFolderPlanner.recordImport(item, importedID: libraryID, mirrorsDeletions: link.mirrorsDeletions,
-                                                     installedBefore: installedBefore, in: &link.record)
+                    let identity = report.linkedDestinations[libraryID]
+                    let destination = LinkedFolderPlanner.recordImport(
+                        item, importedID: libraryID, owned: identity != nil, mirrorsDeletions: link.mirrorsDeletions,
+                        installedBefore: installedBefore, in: &link.record)
+                    if let identity, let destination {
+                        if link.destinations == nil { link.destinations = [:] }
+                        link.destinations?[destination] = identity
+                    }
                 case .failed:
-                    LinkedFolderPlanner.recordImport(item, importedID: nil, mirrorsDeletions: link.mirrorsDeletions,
+                    LinkedFolderPlanner.recordImport(item, importedID: nil, owned: false, mirrorsDeletions: link.mirrorsDeletions,
                                                      installedBefore: installedBefore, in: &link.record)
                 case .notReached:
                     notReached = true
                 }
             }
         }
-        if !held.isEmpty {
-            var status = self.status(of: id)
-            status.held += held.filter { !status.held.contains($0) }
-            statuses[id] = status
-        }
+        statuses[id]?.held = held
         statuses[id]?.failure = report.failures.first
         if !report.failures.isEmpty {
             AppLog.warn("linked folders: \(report.failures.count) file(s) could not be imported: \(report.failures.joined(separator: "; "))")
@@ -298,7 +310,8 @@ final class LinkedFolderCoordinator {
     /// What is due to be removed for the link now, read from its current record: nothing once it
     /// is unlinked or Mirror deletions is off, or while the library is not read.
     private func dueRemovals(_ id: UUID) -> [String] {
-        guard let link = folders.first(where: { $0.id == id }), link.mirrorsDeletions,
+        guard isStarted, pendingEdits[id] == nil,
+              let link = folders.first(where: { $0.id == id }), link.mirrorsDeletions,
               let installed = installedIDs?() else { return [] }
         return LinkedFolderPlanner.dueRemovals(link.record, installed: installed)
     }
@@ -315,17 +328,22 @@ final class LinkedFolderCoordinator {
         guard !changed() else { return }
         let due = dueRemovals(id)
         guard !due.isEmpty else { return }
-        guard let remover else {
+        guard let remover, let link = folders.first(where: { $0.id == id }) else {
             AppLog.info("linked folders: \(due.count) removal(s) wait for the control panel to open")
             return
         }
         // The same while the removal waits for its turn in the panel's queue.
         do {
-            let removed = Set(try await remover(due) { [weak self] in
-                guard let self, !changed() else { return [] }
-                return Set(self.dueRemovals(id))
+            let authorized = Set(due)
+            let removed = Set(try await remover(due, link.destinations ?? [:]) { [weak self] in
+                guard let self, self.isStarted, self.pendingEdits[id] == nil, self.remover != nil, !changed(),
+                      self.folders.first(where: { $0.id == id })?.mirrorsDeletions == true else { return [] }
+                return authorized
             })
-            commit(id) { LinkedFolderPlanner.recordRemoved(removed, in: &$0.record) }
+            commit(id) { link in
+                LinkedFolderPlanner.recordRemoved(removed, in: &link.record)
+                for id in removed { link.destinations?[id] = nil }
+            }
             // A batch cut at the panel's limit goes on; one that moved nothing waits for a look.
             if !removed.isEmpty, !dueRemovals(id).isEmpty { schedule(id) }
             if !removed.isEmpty { AppLog.info("linked folders: removed \(removed.count) wallpaper(s) whose files left the folder") }
@@ -395,13 +413,12 @@ final class LinkedFolderCoordinator {
         }
     }
 
-    private func update(_ id: UUID, _ change: (inout LinkedFolder) -> Void) async throws {
-        loadIfNeeded()
-        guard folders.contains(where: { $0.id == id }) else {
-            throw WallpaperActionError(message: String(localized: "This folder is no longer linked."))
-        }
-        try await transact { links in
-            if let index = links.firstIndex(where: { $0.id == id }) { change(&links[index]) }
+    private func update(_ id: UUID, _ change: @escaping @MainActor (inout LinkedFolder) -> Void) async throws {
+        try await transact(holdingRemovalsFor: id) { links in
+            guard let index = links.firstIndex(where: { $0.id == id }) else {
+                throw WallpaperActionError(message: String(localized: "This folder is no longer linked."))
+            }
+            change(&links[index])
         }
     }
 
@@ -410,18 +427,20 @@ final class LinkedFolderCoordinator {
     ///
     /// The change is saved on a copy, then applied to the links as they are by then: what a look
     /// recorded while the save ran is kept whether the save succeeds or fails.
-    private func transact(_ change: (inout [LinkedFolder]) -> Void) async throws {
+    private func transact(holdingRemovalsFor id: UUID? = nil,
+                          _ change: @escaping @MainActor (inout [LinkedFolder]) throws -> Void) async throws {
         loadIfNeeded()
         if let loadFailure { throw loadFailure }
-        var candidate = folders
-        change(&candidate)
-        try await enqueueSave(candidate).value
-        let before = folders
-        change(&folders)
-        if folders != candidate, folders != before {
-            let write = enqueueSave()
-            Task { do { try await write.value } catch { AppLog.warn("linked folders: could not save: \(error.localizedDescription)") } }
+        if let id { pendingEdits[id, default: 0] += 1 }
+        defer {
+            if let id, pendingEdits[id] == 1 {
+                pendingEdits[id] = nil
+                schedule(id)
+            } else if let id {
+                pendingEdits[id]? -= 1
+            }
         }
+        try await enqueueSave(change).value
     }
 
     /// Applies a change from a reconcile; a failed save is logged, and the change is kept in memory.
@@ -436,16 +455,17 @@ final class LinkedFolderCoordinator {
         Task { do { try await write.value } catch { AppLog.warn("linked folders: could not save: \(error.localizedDescription)") } }
     }
 
-    /// Writes the links off the main actor, one save after another so the newest is the last.
-    private func save() async throws { try await enqueueSave().value }
-
-    private func enqueueSave(_ links: [LinkedFolder]? = nil) -> Task<Void, Error> {
+    /// Takes each snapshot in its turn, after earlier edits have both saved and updated the model.
+    private func enqueueSave(_ change: (@MainActor (inout [LinkedFolder]) throws -> Void)? = nil) -> Task<Void, Error> {
         let previous = saving
-        let snapshot = links ?? folders
-        let store = self.store
-        let write = Task.detached(priority: .utility) {
+        let write = Task { [self] in
             _ = try? await previous?.value
-            try store.save(snapshot)
+            var snapshot = folders
+            try change?(&snapshot)
+            try await Task.detached(priority: .utility) { [store, snapshot] in
+                try await store.save(snapshot)
+            }.value
+            try change?(&folders)
         }
         saving = write
         return write

@@ -2543,9 +2543,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard let store, store.libraryLoadState == .loaded, self?.libraryDrive?.stopsWallpapers != true else { return nil }
             return Set(store.librarySnapshot.wallpapers.map(\.id))
         }
-        linkedFolders.importer = { [weak self] urls in
+        linkedFolders.importer = { [weak self] urls, replacing, expected in
             guard let self, !self.shutdownInProgress else { throw CancellationError() }
-            return try await self.libraryImports.importAndWait(urls, duplicates: .replaceChanged)
+            return try await self.libraryImports.importAndWait(urls, replacingOwned: replacing, expectedIDs: expected)
         }
         linkedFolders.start()
     }

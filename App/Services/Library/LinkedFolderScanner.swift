@@ -10,7 +10,7 @@ protocol LinkedFolderScanning: Sendable {
 struct LinkedFolderScanner: LinkedFolderScanning {
     private static let keys: [URLResourceKey] = [
         .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey,
-        .contentModificationDateKey, .fileIdentifierKey,
+        .contentModificationDateKey, .fileIdentifierKey, .ubiquitousItemDownloadingStatusKey,
     ]
 
     func scan(_ folder: LinkedFolder) async -> LinkedFolderScan {
@@ -31,7 +31,7 @@ struct LinkedFolderScanner: LinkedFolderScanning {
         let files = FileManager.default
         var isDirectory: ObjCBool = false
         // A folder moved to the Trash is on its way out, not a folder whose files were deleted.
-        guard !folder.pathComponents.contains(".Trash"),
+        guard !folder.pathComponents.contains(where: { $0 == ".Trash" || $0 == ".Trashes" }),
               files.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue,
               files.isReadableFile(atPath: folder.path),
               let names = try? files.contentsOfDirectory(atPath: folder.path) else { return .unavailable }
@@ -40,16 +40,15 @@ struct LinkedFolderScanner: LinkedFolderScanning {
         var present = Set<String>()
         for name in names.sorted() {
             if name.hasPrefix(".") {
-                if name.hasSuffix(".icloud"), name.count > ".icloud".count + 1 {
-                    present.insert(String(name.dropFirst().dropLast(".icloud".count)))
-                }
+                if let original = placeholderName(name) { present.insert(original) }
                 continue
             }
             // Listed is present, whatever reading it says: a file or project that cannot be read
             // is never taken for deleted.
             present.insert(name)
             let url = folder.appendingPathComponent(name)
-            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isSymbolicLink != true else { continue }
+            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isSymbolicLink != true,
+                  values.ubiquitousItemDownloadingStatus != .notDownloaded else { continue }
             let isFolder = values.isDirectory == true
             guard isFolder || values.isRegularFile == true,
                   WallpaperImportService.libraryID(forSourceNamed: name, isDirectory: isFolder) != nil
@@ -70,11 +69,17 @@ struct LinkedFolderScanner: LinkedFolderScanning {
         return .contents(contents)
     }
 
+    private static func placeholderName(_ name: String) -> String? {
+        guard name.hasPrefix("."), name.hasSuffix(".icloud"), name.count > ".icloud".count + 1 else { return nil }
+        return String(name.dropFirst().dropLast(".icloud".count))
+    }
+
     /// A Wallpaper Engine project folder's total size and newest modification date, which change
     /// whenever any of its files does, and a digest of every file's relative path, size, date and
     /// file id, which changes when two files swap names. Nil for a folder that is not a project.
     static func projectStamp(_ folder: URL) -> LinkedFolderStamp? {
-        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .fileIdentifierKey]
+        let keys: [URLResourceKey] = [.isRegularFileKey, .fileSizeKey, .contentModificationDateKey, .fileIdentifierKey,
+                                      .ubiquitousItemDownloadingStatusKey]
         let manifest = folder.appendingPathComponent("project.json")
         guard (try? manifest.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
               let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: keys)
@@ -84,7 +89,10 @@ struct LinkedFolderScanner: LinkedFolderScanning {
         var lines: [String] = []
         let base = folder.standardizedFileURL.path.count + 1
         for case let file as URL in walker {
-            guard let values = try? file.resourceValues(forKeys: Set(keys)), values.isRegularFile == true else { continue }
+            guard placeholderName(file.lastPathComponent) == nil,
+                  let values = try? file.resourceValues(forKeys: Set(keys)),
+                  values.ubiquitousItemDownloadingStatus != .notDownloaded else { return nil }
+            guard values.isRegularFile == true else { continue }
             let bytes = Int64(values.fileSize ?? 0)
             let modified = values.contentModificationDate ?? .distantPast
             size += bytes
