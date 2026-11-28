@@ -309,6 +309,22 @@ final class QuitSupervisorTests: XCTestCase {
 
     // MARK: Power off
 
+    /// The quit an update installer waits for: restoration that fails does not strand the
+    /// install, and the new version's launch repair finishes it.
+    func testAnUpdateQuitGoesOnWhenRestorationFailsInsteadOfStrandingTheInstall() async {
+        let supervisor = makeSupervisor(mode: .handover)
+
+        let outcome = await supervisor.run(
+            restoration: throwing("restore", StillRestoring()),
+            teardown: [stage("imports"), stage("bridge")])
+
+        XCTAssertEqual(outcome, .proceedUnrestored(
+            .restorationFailed("macOS is still restoring the desktop wallpaper."), stalled: []))
+        XCTAssertEqual(events, ["restore", "imports", "bridge"])
+        XCTAssertTrue(lines.contains { $0.hasPrefix("quit: update; desktop restoration unfinished") },
+                      "the log says the update left it to the journal: \(lines)")
+    }
+
     func testAPowerOffQuitGoesOnWhenRestorationFailsInsteadOfRefusingTheLogout() async {
         let supervisor = makeSupervisor(mode: .powerOff)
 

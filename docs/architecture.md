@@ -136,8 +136,10 @@ probes the signed update feed; Sparkle owns the download and installation window
   prevent AppKit's nested wait from running the asynchronous cleanup. Quit remains available
   before the renderer starts or when it fails to start.
   Every stage has a deadline. Restoration gets 20 seconds, and a failure or a stall
-  cancels the quit: the panel comes back, an alert says why, a pending update install is
-  called off and the menu shows the error. The other stages share 10 seconds; one that
+  cancels a user's quit: the panel comes back, an alert says why and the menu shows the
+  error. An update's quit (`QuitMode.handover`) has the same limits but never cancels, so a
+  pending install is never stranded; the new version's launch repair finishes the
+  restoration ([updates](features/desktop-picture.md#updates)). The other stages share 10 seconds; one that
   outlives its time is named, left behind and the rest still run, and the bridge keeps at
   least 2 seconds whatever is left. Once the app has replied it arms an exit fuse (5 seconds,
   1 second if a stage was left behind) that ends the process if a slow exit has hung. A quit

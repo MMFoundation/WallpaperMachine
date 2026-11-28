@@ -548,6 +548,17 @@ during one) waits for the quit that is running and is answered with it, so it is
 refused either. If the user's quit then fails to restore, it is tried again once under the
 power-off limits instead of being refused.
 
+### Updates
+
+The quit Sparkle asks for when it installs an update and relaunches (`QuitReason.update`)
+runs as `QuitMode.handover`. It has the user's quit's limits, so restoration has as long as
+ever to finish, but like a logout it never refuses. A refused update quit leaves Sparkle
+waiting for an exit that never comes, and whatever refused it (an original that cannot be
+recovered) refuses the next update the same way, so no update could ever install. The new
+version starts at once, and its launch repair finishes from the journals whatever
+restoration left, as after a logout. The log says `quit: update; desktop restoration
+unfinished (…)`.
+
 ## The native lock-screen provider and Space selection
 
 With **Animate lock screen**, the sandboxed extension owns the system Desktop provider,
