@@ -264,6 +264,8 @@ enum PixivFixtures {
 
     static func detail(_ work: Work, authorID: String? = nil, authorName: String? = nil) -> Data {
         let stamp = "img/2026/09/26/19/04/18/\(work.id)_p0"
+        let userID = authorID ?? String(2000 + work.id)
+        let tags: [[String: Any]] = work.tags.map { ["tag": $0, "locked": false] }
         return json([
             "error": false,
             "message": "",
@@ -273,7 +275,7 @@ enum PixivFixtures {
                 "illustType": work.type,
                 "xRestrict": work.xRestrict,
                 "sl": work.sanity,
-                "userId": authorID ?? String(2000 + work.id),
+                "userId": userID,
                 "userName": authorName ?? "Artist \(work.id)",
                 "width": work.width,
                 "height": work.height,
@@ -288,8 +290,8 @@ enum PixivFixtures {
                     "original": "https://i.pximg.net/img-original/\(stamp).png",
                 ],
                 "tags": [
-                    "authorId": authorID ?? String(2000 + work.id),
-                    "tags": work.tags.map { ["tag": $0, "locked": false] },
+                    "authorId": userID,
+                    "tags": tags,
                 ],
             ],
         ])
