@@ -540,7 +540,9 @@ final class DesktopWallpaperLedger {
         let standIn: String
         if let chosen = fallbacks()[target.display] {
             (original, standIn) = (chosen, "another desktop's original")
-        } else if let systemDefault = systemDefault() {
+        } else if named != nil || journaled == nil, let systemDefault = systemDefault() {
+            // A poster journaled with an inherited original is not given up: a later pass that
+            // can see the display's picture repairs that entry. One with no entry never can be.
             (original, standIn) = (systemDefault, "macOS's default picture")
         } else {
             throw Failure.originalUnavailable
