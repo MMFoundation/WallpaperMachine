@@ -32,9 +32,17 @@ final class LinkedFolderCoordinator {
     /// rescanned (`LibraryImportStore.importAndWait`); throws while another import runs.
     @ObservationIgnored var importer: (@MainActor ([URL]) async throws -> WallpaperImportService.Report)?
     /// Moves wallpapers to the Trash and forgets them as the panel's Delete does, answering the
-    /// ids it removed. Set by an open panel, nil while none is.
-    @ObservationIgnored var remover: (@MainActor ([String]) async throws -> [String])? {
-        didSet { if remover != nil, folders.contains(where: { !$0.record.pendingRemovals.isEmpty }) { reconcileAll() } }
+    /// ids it removed. Set by an open panel, nil while none is. Just before it removes anything,
+    /// in its turn in the command queue, it asks the second argument which of the ids are still
+    /// due, so an unlink or Mirror deletions turned off meanwhile removes nothing.
+    @ObservationIgnored var remover: (@MainActor ([String], @escaping @MainActor () -> Set<String>) async throws -> [String])? {
+        didSet {
+            // Removals found while no panel was open run now; a folder missing earlier is looked for.
+            if remover != nil, folders.contains(where: { $0.record.entries.contains { $0.state == .leaving }
+                || !$0.record.pendingRemovals.isEmpty || status(of: $0.id).isUnavailable }) {
+                reconcileAll()
+            }
+        }
     }
 
     @ObservationIgnored private let store: LinkedFolderStore
@@ -51,6 +59,10 @@ final class LinkedFolderCoordinator {
     @ObservationIgnored private var worker: Task<Void, Never>?
     @ObservationIgnored private var rechecks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored private var saving: Task<Void, Error>?
+    /// Why the saved links could not be read; while set nothing is saved over them.
+    @ObservationIgnored private var loadFailure: Error?
+    @ObservationIgnored private let home: URL
 
     /// A file still being copied is looked at again after `recheckDelay`; only then, if it kept
     /// its size, is it imported.
@@ -62,8 +74,10 @@ final class LinkedFolderCoordinator {
         },
         recheckDelay: Duration = .seconds(3),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
-        notifications: NotificationCenter = NSWorkspace.shared.notificationCenter
+        notifications: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
+        self.home = home
         self.store = store
         self.scanner = scanner
         self.watch = watch
@@ -111,6 +125,7 @@ final class LinkedFolderCoordinator {
     /// waited for. For tests, which drive the looks themselves.
     func waitForIdle() async {
         while let worker { await worker.value }
+        _ = try? await saving?.value
     }
 
     // MARK: Editing links
@@ -128,43 +143,46 @@ final class LinkedFolderCoordinator {
             throw WallpaperActionError(message: String(localized: "This folder is already linked."))
         }
         let link = LinkedFolder(path: folder.path, bookmark: bookmark)
-        folders.append(link)
-        try save()
+        try await transact { $0.append(link) }
         schedule(link.id)
         return link
     }
 
-    /// Stops following a folder. What it imported stays in the library.
-    func unlink(_ id: UUID) throws {
-        loadIfNeeded()
-        folders.removeAll { $0.id == id }
+    /// Stops following a folder. What it imported stays in the library, and nothing it had due
+    /// to remove is removed.
+    func unlink(_ id: UUID) async throws {
+        try await transact { $0.removeAll { $0.id == id } }
         stopWatching(id)
         statuses[id] = nil
         rechecks.removeValue(forKey: id)?.cancel()
-        try save()
     }
 
-    /// Mirror deletions applies to files deleted from now on; wallpapers already kept stay.
-    func setMirrorsDeletions(_ on: Bool, for id: UUID) throws {
-        try update(id) { $0.mirrorsDeletions = on }
+    /// Mirror deletions applies to files deleted from now on. Turning it off calls off every
+    /// removal still due: those wallpapers are kept.
+    func setMirrorsDeletions(_ on: Bool, for id: UUID) async throws {
+        try await update(id) {
+            $0.mirrorsDeletions = on
+            if !on { LinkedFolderPlanner.stopMirroring(&$0.record) }
+        }
         if !on { statuses[id]?.held = [] }
         schedule(id)
     }
 
-    /// Removes the held wallpapers whose files left the folder.
-    func removeHeld(for id: UUID) throws {
-        let held = status(of: id).held
-        guard !held.isEmpty else { return }
-        try update(id) { LinkedFolderPlanner.confirmHeld(held, in: &$0.record) }
-        statuses[id]?.held = []
+    /// Removes the wallpapers of `ids`, the held ones the user was shown and confirmed; any held
+    /// since then waits to be asked about.
+    func removeHeld(_ ids: [String], for id: UUID) async throws {
+        let confirmed = Set(ids).intersection(status(of: id).held)
+        guard !confirmed.isEmpty else { return }
+        try await update(id) { LinkedFolderPlanner.confirmHeld(Array(confirmed), in: &$0.record) }
+        statuses[id]?.held.removeAll { confirmed.contains($0) }
         schedule(id)
     }
 
     /// Keeps the held wallpapers in the library; their files are not asked about again.
-    func keepHeld(for id: UUID) throws {
+    func keepHeld(for id: UUID) async throws {
         let held = status(of: id).held
         guard !held.isEmpty else { return }
-        try update(id) { LinkedFolderPlanner.keepHeld(held, in: &$0.record) }
+        try await update(id) { LinkedFolderPlanner.keepHeld(held, in: &$0.record) }
         statuses[id]?.held = []
     }
 
@@ -187,12 +205,14 @@ final class LinkedFolderCoordinator {
 
     private func reconcile(_ id: UUID) async {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
-        guard let installed = installedIDs?() else {
+        guard installedIDs?() != nil else {
             recheck(id)  // the library is not read yet
             return
         }
         let scan = await scanner.scan(folder)
-        guard isStarted, let current = folders.first(where: { $0.id == id }) else { return }
+        // Read after the scan and with no wait before the import starts, so a file another import
+        // put in the library meanwhile is seen as somebody else's, never claimed by this link.
+        guard isStarted, let current = folders.first(where: { $0.id == id }), let installed = installedIDs?() else { return }
         let plan = LinkedFolderPlanner.plan(record: current.record, scan: scan,
                                             mirrorsDeletions: current.mirrorsDeletions, installed: installed)
         var status = self.status(of: id)
@@ -200,7 +220,7 @@ final class LinkedFolderCoordinator {
         status.held = plan.held
         statuses[id] = status
         guard case .contents(let contents) = scan else {
-            stopWatching(id)
+            watchNearestAncestor(of: current.url, for: id)
             return
         }
         commit(id) { folder in
@@ -208,12 +228,14 @@ final class LinkedFolderCoordinator {
             if contents.folder.path != folder.path { folder.path = contents.folder.path }
         }
         startWatching(id, at: contents.folder)
-        if !plan.imports.isEmpty { await runImports(plan.imports, from: contents.folder, for: id) }
-        if !plan.removals.isEmpty { await runRemovals(plan.removals, for: id) }
+        if !plan.imports.isEmpty { await runImports(plan.imports, from: contents.folder, installedBefore: installed, for: id) }
+        await runRemovals(for: id)
         if plan.needsRecheck { recheck(id) }
     }
 
-    private func runImports(_ items: [LinkedFolderScan.Item], from folder: URL, for id: UUID) async {
+    private func runImports(
+        _ items: [LinkedFolderScan.Item], from folder: URL, installedBefore: Set<String>, for id: UUID
+    ) async {
         guard let importer else { return recheck(id) }
         let report: WallpaperImportService.Report
         do {
@@ -229,10 +251,10 @@ final class LinkedFolderCoordinator {
                 switch LinkedFolderPlanner.outcome(of: item, in: report) {
                 case .imported(let libraryID):
                     LinkedFolderPlanner.recordImport(item, importedID: libraryID, mirrorsDeletions: link.mirrorsDeletions,
-                                                     in: &link.record)
+                                                     installedBefore: installedBefore, in: &link.record)
                 case .failed:
                     LinkedFolderPlanner.recordImport(item, importedID: nil, mirrorsDeletions: link.mirrorsDeletions,
-                                                     in: &link.record)
+                                                     installedBefore: installedBefore, in: &link.record)
                 case .notReached:
                     notReached = true
                 }
@@ -245,14 +267,28 @@ final class LinkedFolderCoordinator {
         if notReached { recheck(id) }
     }
 
-    private func runRemovals(_ ids: [String], for id: UUID) async {
+    /// What is due to be removed for the link now, read from its current record: nothing once it
+    /// is unlinked or Mirror deletions is off, or while the library is not read.
+    private func dueRemovals(_ id: UUID) -> [String] {
+        guard let link = folders.first(where: { $0.id == id }), link.mirrorsDeletions,
+              let installed = installedIDs?() else { return [] }
+        return LinkedFolderPlanner.dueRemovals(link.record, installed: installed)
+    }
+
+    /// Removes what the link has due after any import of this look, so the item a renamed and
+    /// changed file replaced goes in the same look.
+    private func runRemovals(for id: UUID) async {
+        let due = dueRemovals(id)
+        guard !due.isEmpty else { return }
         guard let remover else {
-            AppLog.info("linked folders: \(ids.count) removal(s) wait for the control panel to open")
+            AppLog.info("linked folders: \(due.count) removal(s) wait for the control panel to open")
             return
         }
         do {
-            let removed = Set(try await remover(ids))
-            commit(id) { $0.record.pendingRemovals.removeAll { removed.contains($0) } }
+            let removed = Set(try await remover(due) { [weak self] in Set(self?.dueRemovals(id) ?? []) })
+            commit(id) { LinkedFolderPlanner.recordRemoved(removed, in: &$0.record) }
+            // A batch cut at the panel's limit goes on; one that moved nothing waits for a look.
+            if !removed.isEmpty, !dueRemovals(id).isEmpty { schedule(id) }
             if !removed.isEmpty { AppLog.info("linked folders: removed \(removed.count) wallpaper(s) whose files left the folder") }
         } catch {
             statuses[id]?.failure = error.localizedDescription
@@ -286,21 +322,54 @@ final class LinkedFolderCoordinator {
         watchedPaths[id] = nil
     }
 
+    /// While a folder is missing, its nearest existing parent is watched, so a folder put back
+    /// is noticed. Not the home folder, `/` or `/Volumes`, whose changes never stop; a folder
+    /// under them waits for a wake, a disk mounting or the panel opening.
+    private func watchNearestAncestor(of folder: URL, for id: UUID) {
+        var ancestor = folder.deletingLastPathComponent().standardizedFileURL
+        while ancestor.path != "/", !FileManager.default.fileExists(atPath: ancestor.path) {
+            ancestor = ancestor.deletingLastPathComponent().standardizedFileURL
+        }
+        guard !["/", "/Volumes", home.standardizedFileURL.path].contains(ancestor.path) else {
+            return stopWatching(id)
+        }
+        startWatching(id, at: ancestor)
+    }
+
     // MARK: Persistence
 
     private func loadIfNeeded() {
         guard !loaded else { return }
         loaded = true
-        folders = store.load()
+        do {
+            folders = try store.load()
+        } catch {
+            loadFailure = error
+            AppLog.error("linked folders: \(store.file.lastPathComponent) could not be read, so links are not changed or saved: \(error.localizedDescription)")
+        }
     }
 
-    private func update(_ id: UUID, _ change: (inout LinkedFolder) -> Void) throws {
+    private func update(_ id: UUID, _ change: (inout LinkedFolder) -> Void) async throws {
         loadIfNeeded()
         guard let index = folders.firstIndex(where: { $0.id == id }) else {
             throw WallpaperActionError(message: String(localized: "This folder is no longer linked."))
         }
-        change(&folders[index])
-        try save()
+        try await transact { change(&$0[index]) }
+    }
+
+    /// Applies a change the user made only once it is saved; a failed save leaves the links as
+    /// they were, so the action can simply be tried again.
+    private func transact(_ change: (inout [LinkedFolder]) -> Void) async throws {
+        loadIfNeeded()
+        if let loadFailure { throw loadFailure }
+        let previous = folders
+        change(&folders)
+        do {
+            try await save()
+        } catch {
+            folders = previous
+            throw error
+        }
     }
 
     /// Applies a change from a reconcile; a failed save is logged, and the change is kept in memory.
@@ -310,10 +379,25 @@ final class LinkedFolderCoordinator {
         change(&folder)
         guard folder != folders[index] else { return }
         folders[index] = folder
-        do { try save() } catch { AppLog.warn("linked folders: could not save: \(error.localizedDescription)") }
+        guard loadFailure == nil else { return }
+        let write = enqueueSave()
+        Task { do { try await write.value } catch { AppLog.warn("linked folders: could not save: \(error.localizedDescription)") } }
     }
 
-    private func save() throws { try store.save(folders) }
+    /// Writes the links off the main actor, one save after another so the newest is the last.
+    private func save() async throws { try await enqueueSave().value }
+
+    private func enqueueSave() -> Task<Void, Error> {
+        let previous = saving
+        let snapshot = folders
+        let store = self.store
+        let write = Task.detached(priority: .utility) {
+            _ = try? await previous?.value
+            try store.save(snapshot)
+        }
+        saving = write
+        return write
+    }
 
     /// The folder to link and a bookmark of it. Runs off the main actor: it reads the disk.
     nonisolated static func validate(_ url: URL, library: URL, support: URL) throws -> (URL, Data?) {

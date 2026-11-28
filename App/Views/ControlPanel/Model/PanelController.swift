@@ -475,7 +475,9 @@ final class PanelController {
     }
     // Removing a wallpaper whose file left a linked folder forgets it as Delete does, which
     // needs the panel: removals found while it was closed run now.
-    linkedFolders.remover = { [weak self] ids in try await self?.removeLinkedFolderWallpapers(ids) ?? [] }
+    linkedFolders.remover = { [weak self] ids, stillDue in
+      try await self?.removeLinkedFolderWallpapers(ids, stillDue: stillDue) ?? []
+    }
     refreshVisibilityGatedWork()
   }
 

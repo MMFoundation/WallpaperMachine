@@ -6,7 +6,8 @@ enum LinkedFolderPlanner {
     struct Plan: Equatable, Sendable {
         /// Files to import now: new or changed, and the same size and date as at the last check.
         var imports: [LinkedFolderScan.Item] = []
-        /// Library items to remove now: removals already decided, never more than were decided.
+        /// Library items to remove now: wallpapers of files that left (`leaving`) and items no file
+        /// stands for any more. The coordinator asks again just before removing.
         var removals: [String] = []
         /// Library items whose files left the folder in a number too large to remove without asking.
         var held: [String] = []
@@ -32,11 +33,14 @@ enum LinkedFolderPlanner {
         var plan = Plan(record: record)
         var next = record
         let items = Dictionary(contents.items.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+        // The library may be on a volume that ignores case, where `Rain.mp4` lands on `rain.mp4`.
+        let installedKeys = Set(installed.map { $0.lowercased() })
 
         var kept: [LinkedFolderRecord.Entry] = []
         var gone: [LinkedFolderRecord.Entry] = []
-        for entry in record.entries {
-            if items[entry.path] != nil || contents.evicted.contains(entry.path) {
+        // A leaving item that is no longer installed has been removed: its entry is done.
+        for entry in record.entries where !(entry.state == .leaving && !installed.contains(entry.libraryID)) {
+            if contents.present.contains(entry.path) {
                 kept.append(entry)
             } else {
                 gone.append(entry)
@@ -59,12 +63,17 @@ enum LinkedFolderPlanner {
         }
 
         var entries: [LinkedFolderRecord.Entry] = []
+        var claimed = Set(kept.map { $0.libraryID.lowercased() })
         for var entry in kept {
             guard let item = items[entry.path] else {
-                entries.append(entry)  // evicted by iCloud Drive: still the folder's
+                // Here but unreadable, or evicted by iCloud Drive: still the folder's, never removed.
+                if entry.state == .leaving { entry.state = .present }
+                entries.append(entry)
                 continue
             }
+            // Back in the folder: a removal still due is called off.
             entry.state = .present
+            entry.removalConfirmed = nil
             entry.fileID = item.fileID ?? entry.fileID
             if item.stamp == entry.stamp {
                 next.pending[item.path] = nil
@@ -72,60 +81,78 @@ enum LinkedFolderPlanner {
             } else if !entry.owned {
                 // Never copied over an item this link did not import.
                 entry.stamp = item.stamp
+            } else if item.libraryID.lowercased() != entry.libraryID.lowercased(),
+                      installedKeys.contains(item.libraryID.lowercased()) || claimed.contains(item.libraryID.lowercased()) {
+                // Renamed and changed onto an id another wallpaper has: never imported over it.
+                next.pending[item.path] = nil
             } else if settled(item, in: &next, plan: &plan) {
                 plan.imports.append(item)
             }
             entries.append(entry)
         }
 
-        var claimed = Set(entries.map(\.libraryID))
         for item in unmatched {
-            if let index = next.pendingRemovals.firstIndex(of: item.libraryID), installed.contains(item.libraryID) {
+            let key = item.libraryID.lowercased()
+            if let index = next.pendingRemovals.firstIndex(where: { $0.lowercased() == key }),
+               installed.contains(next.pendingRemovals[index]) {
                 // Back before its wallpaper was removed: it stays.
-                next.pendingRemovals.remove(at: index)
-                entries.append(.init(path: item.path, libraryID: item.libraryID, stamp: item.stamp,
-                                     fileID: item.fileID, owned: true))
-                claimed.insert(item.libraryID)
-            } else if installed.contains(item.libraryID) || claimed.contains(item.libraryID) {
+                let id = next.pendingRemovals.remove(at: index)
+                entries.append(.init(path: item.path, libraryID: id, stamp: item.stamp, fileID: item.fileID, owned: true))
+                claimed.insert(key)
+            } else if installedKeys.contains(key) || claimed.contains(key) {
                 // Somebody else's item of the same id: recorded, never replaced or removed.
                 entries.append(.init(path: item.path, libraryID: item.libraryID, stamp: item.stamp,
                                      fileID: item.fileID, owned: false))
-                claimed.insert(item.libraryID)
+                claimed.insert(key)
                 next.pending[item.path] = nil
             } else if settled(item, in: &next, plan: &plan) {
                 plan.imports.append(item)
             }
         }
 
+        // Removals not yet confirmed are weighed together, including those already decided but
+        // still waiting (while no panel was open): many single departures are still many.
+        let unconfirmed: (LinkedFolderRecord.Entry) -> Bool = {
+            $0.owned && ($0.state == .present || ($0.state == .leaving && $0.removalConfirmed != true))
+        }
         var candidates: [LinkedFolderRecord.Entry] = []
-        for var entry in departed {
-            if !entry.owned { continue }
-            if entry.state == .missing || !mirrorsDeletions {
-                entry.state = .missing
-                entries.append(entry)
-            } else {
+        for var entry in departed where entry.owned {
+            if mirrorsDeletions && unconfirmed(entry) {
                 candidates.append(entry)
+            } else {
+                // Kept, or confirmed and leaving (and kept after all if Mirror deletions went off).
+                if entry.state == .present || !mirrorsDeletions { entry.state = .missing }
+                entries.append(entry)
             }
         }
-        if isMassRemoval(candidates.count, of: record.entries.filter { $0.owned && $0.state == .present }.count) {
+        if isMassRemoval(candidates.count, of: record.entries.filter(unconfirmed).count) {
             plan.held = candidates.map(\.libraryID)
-            entries += candidates
+            entries += candidates.map { var held = $0; held.state = .present; return held }
         } else {
-            next.pendingRemovals += candidates.map(\.libraryID)
+            entries += candidates.map { var leaving = $0; leaving.state = .leaving; return leaving }
         }
 
         let present = Set(contents.items.map(\.path))
         next.pending = next.pending.filter { present.contains($0.key) }
         next.failed = next.failed.filter { present.contains($0.key) }
-        let referenced = Set(entries.map(\.libraryID))
+        let referenced = Set(entries.filter { $0.state != .leaving }.map(\.libraryID))
         var seen = Set<String>()
-        next.pendingRemovals = next.pendingRemovals.filter {
+        next.pendingRemovals = mirrorsDeletions ? next.pendingRemovals.filter {
             installed.contains($0) && !referenced.contains($0) && seen.insert($0).inserted
-        }
+        } : []
         next.entries = entries.sorted { $0.path < $1.path }
-        plan.removals = next.pendingRemovals
+        plan.removals = dueRemovals(next, installed: installed)
         plan.record = next
         return plan
+    }
+
+    /// The library items `record` has decided to remove and that are still installed: the
+    /// wallpapers of files that left, and items no file stands for any more.
+    static func dueRemovals(_ record: LinkedFolderRecord, installed: Set<String>) -> [String] {
+        let keep = Set(record.entries.filter { $0.state != .leaving }.map(\.libraryID))
+        var seen = Set<String>()
+        return (record.entries.filter { $0.state == .leaving && $0.owned }.map(\.libraryID) + record.pendingRemovals)
+            .filter { installed.contains($0) && !keep.contains($0) && seen.insert($0).inserted }
     }
 
     /// Whether removing `count` of a link's `total` wallpapers at once needs the user's go-ahead.
@@ -135,11 +162,14 @@ enum LinkedFolderPlanner {
     }
 
     /// Records what an import of `item` did. `importedID` is the id it has in the library now, or
-    /// nil when it failed. A renamed file that was changed comes back under its new name's id; the
-    /// item under the old one is then due for removal when Mirror deletions is on.
+    /// nil when it failed. The link owns the item only when it was not installed before the import
+    /// (`installedBefore`) or was already this file's: an import that landed on somebody else's
+    /// wallpaper never makes it the link's to remove. A renamed file that was changed comes back
+    /// under its new name's id; the item under the old one is then due for removal when Mirror
+    /// deletions is on.
     static func recordImport(
         _ item: LinkedFolderScan.Item, importedID: String?, mirrorsDeletions: Bool,
-        in record: inout LinkedFolderRecord
+        installedBefore: Set<String>, in record: inout LinkedFolderRecord
     ) {
         record.pending[item.path] = nil
         guard let id = importedID else {
@@ -147,19 +177,23 @@ enum LinkedFolderPlanner {
             return
         }
         record.failed[item.path] = nil
+        let index = record.entries.firstIndex(where: { $0.path == item.path })
+        let previous = index.map { record.entries[$0] }
+        let wasThisFiles = previous.map { $0.owned && $0.libraryID.lowercased() == id.lowercased() } ?? false
+        let owned = wasThisFiles || !installedBefore.contains { $0.lowercased() == id.lowercased() }
         let entry = LinkedFolderRecord.Entry(path: item.path, libraryID: id, stamp: item.stamp,
-                                             fileID: item.fileID, owned: true)
-        if let index = record.entries.firstIndex(where: { $0.path == item.path }) {
-            let previous = record.entries[index].libraryID
+                                             fileID: item.fileID, owned: owned)
+        if let index, let previous {
             record.entries[index] = entry
-            if previous != id, mirrorsDeletions, !record.entries.contains(where: { $0.libraryID == previous }) {
-                record.pendingRemovals.append(previous)
+            if previous.owned, previous.libraryID != id, mirrorsDeletions,
+               !record.entries.contains(where: { $0.libraryID == previous.libraryID }) {
+                record.pendingRemovals.append(previous.libraryID)
             }
         } else {
             record.entries.append(entry)
             record.entries.sort { $0.path < $1.path }
         }
-        record.pendingRemovals.removeAll { $0 == id }
+        if owned { record.pendingRemovals.removeAll { $0 == id } }
     }
 
     /// What an import report says became of `item`: the id it has in the library (identical
@@ -177,19 +211,38 @@ enum LinkedFolderPlanner {
         case notReached
     }
 
-    /// The user confirmed held removals: the entries leave the record and their items are due.
+    /// The user confirmed held removals: those files' wallpapers are due to be removed.
     static func confirmHeld(_ ids: [String], in record: inout LinkedFolderRecord) {
         let confirmed = Set(ids)
-        record.entries.removeAll { confirmed.contains($0.libraryID) && $0.owned }
-        record.pendingRemovals += ids.filter { id in !record.pendingRemovals.contains(id) }
+        for index in record.entries.indices
+        where confirmed.contains(record.entries[index].libraryID) && record.entries[index].owned
+            && record.entries[index].state == .present {
+            record.entries[index].state = .leaving
+            record.entries[index].removalConfirmed = true
+        }
     }
 
     /// The user kept held items: they stay in the library and are never removed for this folder.
     static func keepHeld(_ ids: [String], in record: inout LinkedFolderRecord) {
         let keep = Set(ids)
-        for index in record.entries.indices where keep.contains(record.entries[index].libraryID) {
+        for index in record.entries.indices
+        where keep.contains(record.entries[index].libraryID) && record.entries[index].state == .present {
             record.entries[index].state = .missing
         }
+    }
+
+    /// Mirror deletions went off: nothing still due is removed; those wallpapers are kept.
+    static func stopMirroring(_ record: inout LinkedFolderRecord) {
+        for index in record.entries.indices where record.entries[index].state == .leaving {
+            record.entries[index].state = .missing
+        }
+        record.pendingRemovals = []
+    }
+
+    /// `ids` left the library: their leaving entries and queued removals are done.
+    static func recordRemoved(_ ids: Set<String>, in record: inout LinkedFolderRecord) {
+        record.entries.removeAll { $0.state == .leaving && ids.contains($0.libraryID) }
+        record.pendingRemovals.removeAll { ids.contains($0) }
     }
 
     /// True when `item` looks the same as at the last check, so it is not being written any more.

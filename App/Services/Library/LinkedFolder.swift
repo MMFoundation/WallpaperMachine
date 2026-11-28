@@ -36,6 +36,10 @@ struct LinkedFolderRecord: Codable, Equatable, Sendable {
             /// The file left the folder while Mirror deletions was off, or the user chose to keep
             /// its wallpaper: the wallpaper stays and is never removed for it later.
             case missing
+            /// The file left the folder with Mirror deletions on: its wallpaper is due to be
+            /// removed. The entry is kept until it is, so a file that comes back (under its name or,
+            /// renamed, under its file id) is recognised and its removal called off.
+            case leaving
         }
 
         /// The file's name inside the folder.
@@ -50,6 +54,9 @@ struct LinkedFolderRecord: Codable, Equatable, Sendable {
         /// removed for this folder.
         var owned: Bool
         var state: State = .present
+        /// True when the user confirmed this `leaving` removal; one decided automatically still
+        /// counts toward the share of removals that waits to be asked about.
+        var removalConfirmed: Bool?
     }
 
     var entries: [Entry] = []
@@ -58,7 +65,8 @@ struct LinkedFolderRecord: Codable, Equatable, Sendable {
     var pending: [String: LinkedFolderStamp] = [:]
     /// Files whose last import failed, as they were then: not tried again until they change.
     var failed: [String: LinkedFolderStamp] = [:]
-    /// Library items whose files left the folder and are due to be removed from the library.
+    /// Library items due to be removed that no file stands for any more: the item a renamed and
+    /// changed file was imported anew from.
     var pendingRemovals: [String] = []
 }
 
@@ -67,15 +75,21 @@ struct LinkedFolderStamp: Codable, Equatable, Sendable {
     var size: Int64
     /// Milliseconds since 1970, so a stamp read back from disk compares equal to a fresh one.
     var modified: Int64
+    /// For a project folder, a digest of each file's relative path, size, date and file id, so
+    /// two files that swap names change the stamp although the totals do not.
+    var fingerprint: String?
 
-    init(size: Int64, modified: Int64) {
+    init(size: Int64, modified: Int64, fingerprint: String? = nil) {
         self.size = size
         self.modified = modified
+        self.fingerprint = fingerprint
     }
 
-    init(size: Int64, modified date: Date) {
-        self.init(size: size, modified: Int64((date.timeIntervalSince1970 * 1000).rounded()))
+    init(size: Int64, modified date: Date, fingerprint: String? = nil) {
+        self.init(size: size, modified: Self.milliseconds(date), fingerprint: fingerprint)
     }
+
+    static func milliseconds(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
 }
 
 /// What a look at a linked folder found.
@@ -89,8 +103,16 @@ enum LinkedFolderScan: Equatable, Sendable {
         /// Where the folder is now, which a bookmark may have followed to a new name.
         var folder: URL
         var items: [Item]
-        /// Names of files iCloud Drive evicted to a `.name.icloud` placeholder: still in the folder.
-        var evicted: Set<String> = []
+        /// Every name in the folder, whether or not it could be read: the items, files iCloud Drive
+        /// evicted to a `.name.icloud` placeholder, a project folder whose contents cannot be read.
+        /// A recorded file whose name is here is never taken for deleted.
+        var present: Set<String>
+
+        init(folder: URL, items: [Item], alsoPresent: Set<String> = []) {
+            self.folder = folder
+            self.items = items
+            self.present = Set(items.map(\.path)).union(alsoPresent)
+        }
     }
 
     /// A file the library can import, or a Wallpaper Engine project folder.

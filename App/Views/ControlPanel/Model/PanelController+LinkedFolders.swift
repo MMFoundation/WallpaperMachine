@@ -26,34 +26,34 @@ extension PanelController {
 
   /// `unlinkFolder`: stops following the folder. Its wallpapers stay in the library.
   func unlinkFolder(_ id: UUID) async throws {
-    try await run(.direct) { try linkedFolders.unlink(id) }
+    try await run(.direct) { try await linkedFolders.unlink(id) }
   }
 
   /// `linkedFolderMirrorsDeletions`: whether a file deleted from the folder leaves the library.
   func setLinkedFolderMirrorsDeletions(_ on: Bool, for id: UUID) async throws {
-    try await run(.immediate) { try linkedFolders.setMirrorsDeletions(on, for: id) }
+    try await run(.immediate) { try await linkedFolders.setMirrorsDeletions(on, for: id) }
   }
 
   /// `linkedFolderRemoveHeld`: after a confirmation, moves the wallpapers whose files left the
-  /// folder at once to the Trash.
+  /// folder at once to the Trash: those the sheet counted, never more that left while it was open.
   func removeHeldLinkedFolderWallpapers(_ id: UUID) async throws {
     try await run(.direct) {
-      let count = linkedFolders.status(of: id).held.count
-      guard count > 0 else { return }
+      let held = linkedFolders.status(of: id).held
+      guard !held.isEmpty else { return }
       guard
         await dialogs.confirm(
-          L("Move \(count) wallpapers to Trash?"),
+          L("Move \(held.count) wallpapers to Trash?"),
           detail: L(
             "Affected displays switch to another available wallpaper when possible. The original files you imported are not affected."
           ),
           button: L("Move to Trash"))
       else { return }
-      try linkedFolders.removeHeld(for: id)
+      try await linkedFolders.removeHeld(held, for: id)
     }
   }
 
   /// `linkedFolderKeepHeld`: keeps the wallpapers whose files left the folder at once.
   func keepHeldLinkedFolderWallpapers(_ id: UUID) async throws {
-    try await run(.direct) { try linkedFolders.keepHeld(for: id) }
+    try await run(.direct) { try await linkedFolders.keepHeld(for: id) }
   }
 }

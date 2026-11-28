@@ -13,17 +13,23 @@ struct LinkedFolderStore: Sendable {
         self.file = file
     }
 
-    /// The saved links; none when nothing was saved yet. A file that cannot be read is set aside
-    /// rather than overwritten by the next save, so the links it held can still be recovered.
-    func load() -> [LinkedFolder] {
-        guard let data = try? Data(contentsOf: file) else { return [] }
+    /// The saved links; none when nothing was saved yet. A file that is there but cannot be read
+    /// throws, and the coordinator then saves nothing over it. One that reads but does not decode
+    /// is set aside as `LinkedFolders.unreadable.json`, so the links it held can still be recovered.
+    func load() throws -> [LinkedFolder] {
+        let data: Data
+        do {
+            data = try Data(contentsOf: file)
+        } catch CocoaError.fileReadNoSuchFile {
+            return []
+        }
         do {
             return try JSONDecoder().decode(File.self, from: data).folders
         } catch {
             AppLog.warn("linked folders: \(file.lastPathComponent) could not be read (\(error.localizedDescription)); starting without links")
             let aside = file.deletingPathExtension().appendingPathExtension("unreadable.json")
             try? FileManager.default.removeItem(at: aside)
-            try? FileManager.default.moveItem(at: file, to: aside)
+            try FileManager.default.moveItem(at: file, to: aside)
             return []
         }
     }

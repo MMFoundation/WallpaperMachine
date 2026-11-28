@@ -23,7 +23,8 @@ final class LibraryImportStore {
     /// Runs after an import finishes rescanning the library, receiving the newly imported and
     /// replaced wallpaper IDs (e.g. to schedule low-priority background compatibility pre-checks).
     @ObservationIgnored var onImported: (@MainActor ([String]) -> Void)?
-    @ObservationIgnored private var task: Task<Void, Never>?
+    /// Answers its own import's outcome, so a caller waiting on it never reads a later import's.
+    @ObservationIgnored private var task: Task<Result<WallpaperImportService.Report, Error>, Never>?
     /// The files are in and the import is only rescanning and reloading, on the bridge.
     @ObservationIgnored private var isSettling = false
     @ObservationIgnored private var isShuttingDown = false
@@ -46,19 +47,23 @@ final class LibraryImportStore {
         failure = nil
         report = nil
         status = String(localized: "Preparing import…")
-        task = Task { [weak self] in await self?.run(sources, duplicates: duplicates) }
+        task = Task { [weak self] in
+            guard let self else { return .failure(CancellationError()) }
+            return await self.run(sources, duplicates: duplicates)
+        }
     }
 
     /// Imports `sources` as `start` does, shown in the panel like any import, and answers its
     /// report once the library has been rescanned: what a linked folder imports with. Throws when
-    /// an import is already running or this one could not finish.
+    /// an import is already running or this one could not copy its files. A rescan that failed
+    /// afterwards still answers the report, since the files it lists are in the library; the
+    /// failure shows as for any import.
     func importAndWait(_ sources: [URL], duplicates: WallpaperImportService.DuplicatePolicy) async throws
         -> WallpaperImportService.Report {
         guard !sources.isEmpty else { return WallpaperImportService.Report() }
         try start(sources, duplicates: duplicates)
-        await task?.value
-        if let report { return report }
-        throw WallpaperActionError(message: failure ?? String(localized: "Import could not finish"))
+        guard let running = task else { throw CancellationError() }
+        return try await running.value.get()
     }
 
     func cancel() {
@@ -76,29 +81,35 @@ final class LibraryImportStore {
         isShuttingDown = true
         guard let running = task, !isSettling else { return }
         running.cancel()
-        await running.value
+        _ = await running.value
     }
 
     func dismissFailure() { failure = nil }
 
-    private func run(_ sources: [URL], duplicates: WallpaperImportService.DuplicatePolicy) async {
+    @discardableResult
+    private func run(_ sources: [URL], duplicates: WallpaperImportService.DuplicatePolicy) async
+        -> Result<WallpaperImportService.Report, Error> {
         defer {
             task = nil
             isSettling = false
             isBusy = false
         }
+        var copied: WallpaperImportService.Report?
         do {
             let report = try await importer.importItems(sources, into: library, duplicates: duplicates) {
                 [weak self] status in
                 guard let self else { return }
                 await MainActor.run { self.status = status }
             }
+            copied = report
             self.report = report
             if !isShuttingDown { try await settle(report) }
             status = report.cancelled ? String(localized: "Import cancelled") : String(localized: "Import complete")
+            return .success(report)
         } catch {
             failure = error.localizedDescription
             status = String(localized: "Import could not finish")
+            return copied.map { .success($0) } ?? .failure(error)
         }
     }
 

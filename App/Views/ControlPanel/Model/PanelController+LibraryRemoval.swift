@@ -66,24 +66,29 @@ extension PanelController {
 
   /// The same removal as `deleteMany`, without asking, for wallpapers whose files left a linked
   /// folder with Mirror deletions on (`LinkedFolderCoordinator`); a large share was already
-  /// confirmed in Settings. Ids no longer installed count as removed. Answers the removed ids;
-  /// one that could not be moved stays due and is tried at the folder's next look.
-  func removeLinkedFolderWallpapers(_ ids: [String]) async throws -> [String] {
-    let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
-    let gone = ids.filter { !installed.contains($0) }
-    let due = Array(ids.filter(installed.contains).prefix(Self.batchLimit))
-    guard !due.isEmpty else { return gone }
+  /// confirmed in Settings. `stillDue` is asked in the command queue's turn, just before
+  /// anything moves, and only ids it still names are removed. Ids no longer installed count as
+  /// removed. Answers the removed ids; one that could not be moved stays due.
+  func removeLinkedFolderWallpapers(
+    _ ids: [String], stillDue: @escaping @MainActor () -> Set<String>
+  ) async throws -> [String] {
     var removed: [String] = []
     try await store.commands.run(choosing: deletionDisplaySlots) {
+      let current = stillDue()
+      let installed = Set(store.librarySnapshot.wallpapers.map(\.id))
+      let wanted = ids.filter(current.contains)
+      removed = wanted.filter { !installed.contains($0) }
+      let due = Array(wanted.filter(installed.contains).prefix(Self.batchLimit))
+      guard !due.isEmpty else { return }
       let report = try await store.deleteWallpapersAsync(ids: due, recycle: recycleWallpaperFolder)
-      removed = report.deleted
+      removed += report.deleted
       try await forgetLibraryMetadata(report.deleted)
       for failure in report.failures {
         AppLog.warn("linked folders: could not move \(failure.id) to Trash: \(failure.error.localizedDescription)")
       }
       if let error = report.playbackError { throw error }
     }
-    return gone + removed
+    return removed
   }
 
   /// Deletion can affect every independent display. Automatic choices give way while its

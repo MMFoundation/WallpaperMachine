@@ -58,6 +58,15 @@ actor WallpaperImportService {
         if videoExtensions.contains(ext) || webExtensions.contains(ext) { return "local-" + name }
         return nil
     }
+
+    /// The library id an import gives `source`, reading a folder's manifest as the import does:
+    /// a folder whose name is not a Workshop id but whose manifest names the item it copies is
+    /// filed under that item's id.
+    nonisolated static func libraryID(forSourceAt source: URL, isDirectory: Bool) -> String? {
+        let name = source.lastPathComponent
+        if isDirectory, workshopID(name) == nil, let inferred = inferredWorkshopID(of: source) { return inferred }
+        return libraryID(forSourceNamed: name, isDirectory: isDirectory)
+    }
     nonisolated static let stagingPrefix = ".WallpaperMachine-import-"
     nonisolated static let stagingOwnerName = ".owner"
     nonisolated private static let stagingOwnerMarker = Data("WallpaperMachine local import v1\n".utf8)
@@ -162,7 +171,7 @@ actor WallpaperImportService {
         var id = name
         if isDirectory {
             kind = .project
-            if Self.workshopID(name) == nil, let inferred = inferredWorkshopID(of: candidate) {
+            if Self.workshopID(name) == nil, let inferred = Self.inferredWorkshopID(of: candidate) {
                 id = inferred
                 report.recognizedWorkshopIDs[name] = inferred
                 AppLog.info("import: \(name) is a copy of Workshop item \(inferred); filing it under that id")
@@ -273,7 +282,7 @@ actor WallpaperImportService {
         for id in names.sorted() where id.hasPrefix("local-") {
             guard !Task.isCancelled else { break }
             let folder = library.appendingPathComponent(id, isDirectory: true)
-            guard holdsProjectManifest(folder), var manifest = readManifest(at: folder),
+            guard holdsProjectManifest(folder), var manifest = Self.readManifest(at: folder),
                   manifest["type"] as? String == "video", manifest["preview"] == nil,
                   let file = manifest["file"] as? String, !file.contains("/"), isSafeRelativePath(file),
                   file != StillImageWallpaper.previewFile,
@@ -624,7 +633,7 @@ actor WallpaperImportService {
     /// The preset described by `root/project.json`, or nil when it is anything else; ordinary
     /// validation then reports what is wrong with it.
     private func presetManifest(at root: URL) -> Preset? {
-        guard let manifest = readManifest(at: root),
+        guard let manifest = Self.readManifest(at: root),
               ((manifest["type"] as? String) ?? "").isEmpty,
               let dependency = Self.workshopID(manifest["dependency"]) else { return nil }
         return Preset(manifest: manifest, dependency: dependency)
@@ -632,7 +641,7 @@ actor WallpaperImportService {
 
     /// The JSON object in `root/project.json`, or nil unless that is a regular file (not a link)
     /// of at most 16 MB without a byte-order mark. Import validation still insists on UTF-8.
-    private func readManifest(at root: URL) -> [String: Any]? {
+    nonisolated private static func readManifest(at root: URL) -> [String: Any]? {
         let url = root.appendingPathComponent("project.json")
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]),
               values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? 0) <= 16 * 1024 * 1024,
@@ -644,7 +653,7 @@ actor WallpaperImportService {
     /// manifest's `workshopid`, else the item its `workshopurl` points at. Only a whole positive
     /// number counts. The folder name is not consulted (a title like "2077" is not an id), and a
     /// manifest naming nothing usable leaves the folder name as the library id.
-    private func inferredWorkshopID(of folder: URL) -> String? {
+    nonisolated private static func inferredWorkshopID(of folder: URL) -> String? {
         guard let manifest = readManifest(at: folder) else { return nil }
         // A fraction, an exponent (`1e3`) or a number too large for 64 bits is a measurement, not an identifier.
         let isMeasurement = (manifest["workshopid"] as? NSNumber).map { ["f", "d"].contains(String(cString: $0.objCType)) } ?? false
