@@ -210,23 +210,11 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
         try await store.reload()
     }
 
-    /// The lock-screen journal can hold thousands of entries (one per Space macOS ever made),
-    /// so it is read again only when its size or modification date changed. Only a read that
-    /// succeeded is kept: one that failed is tried again at the next prune.
-    private var journaled: (stamp: (Date?, Int?), urls: Set<URL>)?
-    private let lockScreenFolder: URL = ClientPaths.lockScreenURL
+    private var pictureReferences = LockScreenWallpaperSelection.PictureReferences(
+        journal: ClientPaths.lockScreenURL.appendingPathComponent(LockScreenWallpaperSelection.journalName))
 
     func journaledPictureURLs() throws -> Set<URL> {
-        let file = lockScreenFolder.appendingPathComponent(LockScreenWallpaperSelection.journalName)
-        let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-        let stamp = (values?.contentModificationDate, values?.fileSize)
-        // An unknown stamp (no journal, or metadata that could not be read) is never cached:
-        // a missing journal is cheap to look for, and an unreadable one must reach the reader.
-        let known = stamp.0 != nil && stamp.1 != nil
-        if known, let journaled, journaled.stamp == stamp { return journaled.urls }
-        let urls = try LockScreenWallpaperSelection.journaledPictureURLs(in: lockScreenFolder)
-        journaled = known ? (stamp, urls) : nil
-        return urls
+        try pictureReferences.read()
     }
 
     func referencedPictureURLs(targets: [DesktopPictureTarget]) throws -> Set<URL> {

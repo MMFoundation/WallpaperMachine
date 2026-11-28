@@ -119,21 +119,51 @@ final class LockScreenWallpaperTests: XCTestCase {
     var original = fixture()
     original["Displays"] = ["one": display, "two": node("display-two")]
     try write(original)
-    let folder = journal.deletingLastPathComponent()
     let selection = LockScreenWallpaperSelection(
-      storeURL: store, journalURL: folder.appendingPathComponent(LockScreenWallpaperSelection.journalName), reload: {})
+      storeURL: store, journalURL: journal, reload: {})
+    var references = LockScreenWallpaperSelection.PictureReferences(journal: journal)
 
-    XCTAssertTrue(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty)
+    XCTAssertTrue(try references.read().isEmpty)
     try await selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: [])
-    XCTAssertEqual(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder), [poster.standardizedFileURL])
+    XCTAssertEqual(try references.read(), [poster.standardizedFileURL])
 
     try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
-    XCTAssertTrue(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty,
-                  "once restored, the journal no longer holds the poster back")
+    XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+    XCTAssertEqual(try references.read(), [poster.standardizedFileURL], "archive replay can still restore this poster")
+
+    original["Displays"] = ["one": node("new-choice"), "two": node("display-two")]
+    try write(original)
+    try await selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: [])
+    try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertTrue(try references.read().isEmpty, "a newer archived baseline releases the old poster")
 
     // A journal that is there but cannot be read is not an empty one.
-    try Data("not a journal".utf8).write(to: folder.appendingPathComponent(LockScreenWallpaperSelection.journalName))
-    XCTAssertThrowsError(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder))
+    try Data("not a journal".utf8).write(to: journal)
+    XCTAssertThrowsError(try references.read())
+  }
+
+  @MainActor
+  func testReplacingAJournalWithTheSameSizeAndModificationDateRefreshesItsPictures() throws {
+    func journalData(_ picture: URL) throws -> Data {
+      let configuration = try PropertyListSerialization.data(
+        fromPropertyList: ["url": ["relative": picture.absoluteString]], format: .binary, options: 0)
+      let node = try PropertyListSerialization.data(fromPropertyList: [
+        "Desktop": ["Content": ["Choices": [["Provider": "com.apple.wallpaper.choice.image", "Configuration": configuration]]]]
+      ], format: .binary, options: 0)
+      let entry: [String: Any] = ["path": ["Displays", "one"], "created": false, "original": node]
+      return try PropertyListSerialization.data(fromPropertyList: [entry], format: .binary, options: 0)
+    }
+    let first = root.appendingPathComponent("a.jpg"), second = root.appendingPathComponent("b.jpg")
+    let a = try journalData(first), b = try journalData(second)
+    XCTAssertEqual(a.count, b.count)
+    var references = LockScreenWallpaperSelection.PictureReferences(journal: journal)
+    let attributes: [FileAttributeKey: Any] = [.modificationDate: Date(timeIntervalSince1970: 10)]
+    try a.write(to: journal, options: .atomic)
+    try FileManager.default.setAttributes(attributes, ofItemAtPath: journal.path)
+    XCTAssertEqual(try references.read(), [first.standardizedFileURL])
+    try b.write(to: journal, options: .atomic)
+    try FileManager.default.setAttributes(attributes, ofItemAtPath: journal.path)
+    XCTAssertEqual(try references.read(), [second.standardizedFileURL])
   }
 
   @MainActor
@@ -1955,6 +1985,8 @@ final class LockScreenWallpaperTests: XCTestCase {
       saved[index][field] = payload
       let invalidJournal = try PropertyListSerialization.data(fromPropertyList: saved, format: .binary, options: 0)
       try invalidJournal.write(to: journal, options: .atomic)
+      var references = LockScreenWallpaperSelection.PictureReferences(journal: journal)
+      XCTAssertThrowsError(try references.read())
 
       var reloads = 0
       let recovered = LockScreenWallpaperSelection(
@@ -1965,6 +1997,7 @@ final class LockScreenWallpaperTests: XCTestCase {
       XCTAssertEqual(reloads, 0)
 
       try validJournal.write(to: journal, options: .atomic)
+      XCTAssertNoThrow(try references.read())
       try await recovered.recover()
       XCTAssertEqual(try readStore() as NSDictionary, original as NSDictionary)
       XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))

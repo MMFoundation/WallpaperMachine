@@ -72,11 +72,12 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     func referencedPictureURLs(targets: [DesktopPictureTarget]) -> Set<URL> { persistedPictures }
     /// What the lock screen's journal would write back.
     var journaled: Set<URL> = []
+    var nativeReferences: LockScreenWallpaperSelection.PictureReferences?
     /// The lock screen's journal is there but cannot be read.
     var journalUnreadable = false
     func journaledPictureURLs() throws -> Set<URL> {
         if journalUnreadable { throw CocoaError(.fileReadCorruptFile) }
-        return journaled
+        return try nativeReferences?.read() ?? journaled
     }
 
     /// macOS's wallpaper store, which a per-Space write changes along with the picture.
@@ -478,20 +479,20 @@ final class DesktopWallpaperTests: XCTestCase {
     /// still names an original.
     @MainActor
     func testRecordedOriginalsAreReportedUntilTheyAreRestored() async throws {
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "no journal yet")
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root.appendingPathComponent("absent")))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root), "no journal yet")
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root.appendingPathComponent("absent")))
         let workspace = MemoryDesktopWorkspace()
         workspace.pictures = [one: original("before")]
         let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "a ledger with nothing written leaves no journal")
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root), "a ledger with nothing written leaves no journal")
 
         try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
-        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root))
         try await ledger.restoreAll()
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "restoring prunes what it put back")
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root), "restoring prunes what it put back")
 
         try Data("not json".utf8).write(to: root.appendingPathComponent("originals.json"))
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "a damaged journal names nothing to restore")
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root), "a damaged journal names nothing to restore")
     }
 
     /// Turning writes off: the running sync puts every original back with the quit's verified
@@ -517,7 +518,7 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual(workspace.pictures[one], original("one"))
         XCTAssertEqual(workspace.pictures[two], original("two"))
         XCTAssertTrue(sync.isSuspended, "a restored sync must not start writing again by itself")
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
 
         let written = workspace.writes.count
         post(Data([2]), layer: layer, center: center)
@@ -537,7 +538,7 @@ final class DesktopWallpaperTests: XCTestCase {
         let first = try DesktopWallpaperLedger(folder: root, workspace: workspace)
         try await first.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
         XCTAssertNotEqual(workspace.pictures[one], original("one"))
-        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root))
 
         // The app is gone; nothing but the journal and the poster files remain.
         let fresh = try DesktopWallpaperSync(folder: root, workspace: workspace,
@@ -545,7 +546,7 @@ final class DesktopWallpaperTests: XCTestCase {
         try await fresh.restoreForTermination(wait: {})
         XCTAssertEqual(workspace.pictures[one], original("one"))
         XCTAssertEqual(workspace.pictures[two], original("two"))
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
         XCTAssertTrue(try posterNames().isEmpty, "the posters themselves are deleted once nothing shows them")
     }
 
@@ -569,7 +570,7 @@ final class DesktopWallpaperTests: XCTestCase {
 
         try await ledger.restoreAll()
         XCTAssertEqual(workspace.pictures[external], kept)
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
     }
 
     /// When every recorded original is gone, the quit and the launch repair (a fresh sync over
@@ -592,7 +593,7 @@ final class DesktopWallpaperTests: XCTestCase {
             XCTFail("With no picture left at all there is nothing to put back")
         } catch {
             XCTAssertEqual(error as? DesktopWallpaperLedger.Failure, .originalUnavailable)
-            XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root), "the journal stays for a later run")
+            XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root), "the journal stays for a later run")
         }
 
         let picture = system.appendingPathComponent("Default.heic")
@@ -603,7 +604,7 @@ final class DesktopWallpaperTests: XCTestCase {
         for target in [one, two, external] {
             XCTAssertEqual(workspace.pictures[target]?.url, picture.resolvingSymlinksInPath())
         }
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
         XCTAssertTrue(try posterNames().isEmpty)
     }
 
@@ -614,6 +615,10 @@ final class DesktopWallpaperTests: XCTestCase {
     @MainActor
     func testAPrunedPosterPutBackByAnotherJournalGivesWayToTheMacOSDefaultPicture() async throws {
         let pruned = root.appendingPathComponent("poster-pruned.jpg")
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root, afterNativeRecovery: true))
+        try Data("{}".utf8).write(to: root.appendingPathComponent("originals.json"))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root, afterNativeRecovery: true))
         let workspace = MemoryDesktopWorkspace()
         workspace.pictures = [one: .poster(pruned), two: .poster(pruned)]
         let system = root.appendingPathComponent("System", isDirectory: true)
@@ -659,7 +664,7 @@ final class DesktopWallpaperTests: XCTestCase {
 
         XCTAssertEqual(workspace.pictures[one], user)
         XCTAssertTrue(try posterNames().isEmpty)
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
     }
 
     /// A lock-screen journal that cannot be read may name any poster, so none is pruned until it
@@ -671,15 +676,65 @@ final class DesktopWallpaperTests: XCTestCase {
         let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
         try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
         let poster = try XCTUnwrap(workspace.pictures[one]?.url)
-        workspace.pictures[one] = try DesktopSpaceWallpaperAPI.decodePicture([:])
 
         workspace.journalUnreadable = true
+        workspace.pictures[one] = original("user")
         try await ledger.synchronize(posters: [:], liveDisplays: ["1"])
+        for frame: UInt8 in 2...12 {
+            try await ledger.synchronize(posters: ["1": Data([frame])], liveDisplays: ["1"])
+        }
+        XCTAssertEqual(try posterNames(), [poster.lastPathComponent])
+        XCTAssertEqual(workspace.pictures[one], original("user"))
+        workspace.pictures[one] = .poster(poster)
+        try await ledger.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], original("user"))
         XCTAssertEqual(try posterNames(), [poster.lastPathComponent])
 
         workspace.journalUnreadable = false
-        try await ledger.synchronize(posters: [:], liveDisplays: ["1"])
+        try await ledger.synchronize(posters: ["1": Data([13])], liveDisplays: ["1"])
+        let resumed = try XCTUnwrap(workspace.pictures[one]?.url)
+        XCTAssertEqual(try Data(contentsOf: resumed), Data([13]))
+        XCTAssertEqual(try posterNames(), [resumed.lastPathComponent])
+        try await ledger.restoreAll()
         XCTAssertTrue(try posterNames().isEmpty)
+    }
+
+    @MainActor
+    func testArchiveReplayAfterPosterCleanupCanRestoreTheUserPictureWithWritingOff() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        let user = original("user")
+        workspace.pictures = [one: user]
+        let journal = root.appendingPathComponent("LockScreen/native-selection.plist")
+        workspace.nativeReferences = .init(journal: journal)
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        let poster = try XCTUnwrap(workspace.pictures[one]?.url)
+        let systemStore = root.appendingPathComponent("Index.plist")
+        let idle = try storeSelection(provider: "idle", configuration: [:])
+        let display: [String: Any] = ["Type": "individual", "Desktop": try storeImage(poster), "Idle": idle]
+        let before: [String: Any] = ["Displays": ["1": display], "Spaces": [String: Any]()]
+        try storeData(before).write(to: systemStore)
+        let selection = LockScreenWallpaperSelection(storeURL: systemStore, journalURL: journal, reload: {})
+        try await selection.synchronize(desktopDisplays: ["1"], screenSaverDisplays: [], revision: "old")
+        let stale = try Data(contentsOf: systemStore)
+        try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
+
+        try await ledger.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], user)
+        XCTAssertEqual(try posterNames(), [poster.lastPathComponent])
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root), "writing-off launch must schedule repair")
+
+        try stale.write(to: systemStore, options: .atomic)
+        let relaunched = LockScreenWallpaperSelection(storeURL: systemStore, journalURL: journal, reload: {})
+        try await relaunched.recover()
+        let replayed = try SystemDesktopPictureWorkspace.referencedPictureURLs(
+            in: Data(contentsOf: systemStore), displays: ["1"], spaces: [])
+        XCTAssertEqual(replayed, [poster.standardizedFileURL])
+        workspace.pictures[one] = .poster(try XCTUnwrap(replayed.first))
+        let repair = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try await repair.restoreAll()
+        XCTAssertEqual(workspace.pictures[one], user)
     }
 
     /// Only a file that is certainly gone gives way. One the app may not look at, as in a
@@ -924,7 +979,7 @@ final class DesktopWallpaperTests: XCTestCase {
 
             await XCTAssertThrowsErrorAsync(try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"]))
             XCTAssertTrue(workspace.writes.isEmpty)
-            XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: folder))
+            XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: folder))
             XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
 
             // The lock-screen journal restores the real selection before the next attempt.
@@ -1072,7 +1127,7 @@ final class DesktopWallpaperTests: XCTestCase {
 
         try await ledger.restoreAll()
         XCTAssertEqual(workspace.pictures[one], original("before"))
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
         XCTAssertFalse(FileManager.default.fileExists(atPath: poster.path))
     }
 
@@ -1128,7 +1183,7 @@ final class DesktopWallpaperTests: XCTestCase {
         release?.resume()
         try await blocking.value
         XCTAssertTrue(workspace.writes.isEmpty)
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
     }
 
     @MainActor
@@ -1193,7 +1248,7 @@ final class DesktopWallpaperTests: XCTestCase {
         workspace.store = originalStore
         try await ledger.restoreAll()
         XCTAssertEqual(workspace.pictures[one], original("before"))
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
     }
 
     @MainActor
@@ -1231,7 +1286,7 @@ final class DesktopWallpaperTests: XCTestCase {
             await sync.drainPendingWrites()
             if suspend {
                 XCTAssertTrue(workspace.writes.isEmpty)
-                XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: folder))
+                XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: folder))
             } else {
                 XCTAssertEqual(workspace.writes, [one])
                 XCTAssertEqual(try Data(contentsOf: XCTUnwrap(workspace.pictures[one]?.url)), Data([2]))
@@ -1266,7 +1321,7 @@ final class DesktopWallpaperTests: XCTestCase {
         await draining.value
         XCTAssertTrue(drained)
         XCTAssertEqual(workspace.writes, [one, two])
-        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root))
         workspace.confirmWrite = nil
         await sync.stop().value
     }
@@ -1299,17 +1354,17 @@ final class DesktopWallpaperTests: XCTestCase {
         let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
         try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
         // A crash before quitting leaves the store copy for the launch repair.
-        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root))
         // A store that cannot be read keeps the copy for a later restoration.
         let written = workspace.store
         workspace.store = nil
         workspace.didWrite = nil
         try await ledger.restoreAll()
-        XCTAssertTrue(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertTrue(DesktopWallpaperLedger.needsRecovery(in: root))
         workspace.store = written
         try await ledger.restoreAll()
         XCTAssertEqual(try storeRoot(workspace.store) as NSDictionary, try storeRoot(saved) as NSDictionary)
-        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+        XCTAssertFalse(DesktopWallpaperLedger.needsRecovery(in: root))
     }
 
     /// Only selections the app wrote are put back: a choice made in System Settings while the

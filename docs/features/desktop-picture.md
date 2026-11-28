@@ -65,10 +65,10 @@ refresh, so a [settings backup](backup-restore.md) neither exports nor restores 
   while a restore runs waits for the restore to finish, then starts posters again.
 - **A poster left behind is found at launch.** With the switch off and no sync running,
   the launch (and the end of an animated lock screen) reads the journal
-  (`DesktopWallpaperLedger.hasRecordedOriginals`): if it still names an original or the
-  [store copy](#the-journal-of-originals) is still there, a sync that never starts restores it, for a poster that a crash or an earlier run with
-  the switch on left on a desktop. A desktop showing anything but a poster keeps its
-  choice, as on every restore.
+  (`DesktopWallpaperLedger.needsRecovery`). A recorded original or a remaining
+  [store copy](#the-journal-of-originals) triggers a restore without enabling poster writing.
+  After native recovery, even an empty poster journal triggers one check for a poster an
+  older version pruned. Desktops showing anything but a poster keep their choices.
 - **Animate lock screen decides.** While the lock screen is requested, or the native
   provider has the desktop, the extension owns the picture and journals the poster as
   its own original. The switch is then locked in the panel with the reason, the action
@@ -366,14 +366,17 @@ The store is read once per such pass, not for ordinary updates to journaled post
 The reverse can happen: the lock screen's own journal (`<support>/LockScreen/native-selection.plist`)
 records whatever a desktop showed when the lock screen took it over, and that can be a
 poster. When the lock screen restores, it puts that poster back, and this ledger then
-writes the poster's original over it. So a poster stays, with its entry, for as long as
-that journal names it, even while no desktop shows it: pruning it first left a poster
-nobody could restore, and quitting refused every time. The ledger reads that journal only
-when a pass would delete a poster, and again only once the file has changed (it can hold
-thousands of entries, one per Space macOS ever made). A journal that is there but cannot
-be read may name any poster, so none is deleted until it can be read again; `AppLog`
-says so once. The journal's archive of released entries (`restored-native-selection.plist`)
-does not count: it is kept for good, and so would every poster it names.
+writes the poster's original over it. A poster and its entry stay while either the live
+journal or the archive of released fields (`restored-native-selection.plist`) names it:
+WallpaperAgent can replay an old selection after the live journal is gone. The archive
+keeps the latest released choices per node, not every poster ever shown. A newer choice
+releases its predecessor; the next cleanup can then delete the old poster.
+
+A pass checks these files when it would delete a poster, or before creating a new one
+after a journal read failed or a ledger with existing entries reopened. Each journal is
+decoded only when its file changes. If either cannot be read, existing posters stay and
+new poster files pause rather than filling the disk. Desktops can still be restored.
+`AppLog` records the failure once; the next synchronization retries.
 
 Another app can delete a picture it set, as a wallpaper app clearing out its old
 downloads does, and macOS refuses to show a file that does not exist. Writing that
@@ -385,10 +388,9 @@ desktop on its display, its effective image, its journal, another display's). Wh
 is left it gets macOS's default picture
 (`/System/Library/CoreServices/DefaultDesktop.heic`, written as the file that link points
 to). `AppLog` records the missing file and what was put back instead. A poster with no
-journal entry at all (one an earlier version pruned while the lock screen's journal still
-named it, or one that journal's archive puts back) takes the same fallbacks: no retry
-could find its original, so it never refuses a quit. Only a definite "no
-such file" counts. A file the app may not look at, such as one in a folder macOS's
+journal entry at all (one an earlier version pruned while the lock screen's journal or
+archive still named it) takes the same fallbacks: no retry could find its original. Only a
+definite "no such file" counts. A file the app may not look at, such as one in a folder macOS's
 privacy protection covers, is written back as before. Files are looked at only while a
 desktop is being put back, never for each poster.
 
@@ -410,6 +412,12 @@ retried by the next pass or launch even though the store has nothing left to cha
 Settings meanwhile is kept, a snapshot entry that already named a poster or the app's
 native extension is never put back, and the store is written only if it is still the version just read. The copy is
 deleted once restoration succeeds.
+
+If WallpaperAgent later replays an archived poster after that copy was deleted, the
+poster entry still restores an image and its settings. It cannot reconstruct an aerial
+or other native provider from a still image alone. That later repair can leave the
+provider's still on the desktop; reselecting the provider in System Settings restores
+its animation.
 
 A desktop showing anything but a poster was changed outside the app and keeps that
 choice on restoration. When a display stops showing a live wallpaper, its desktops are

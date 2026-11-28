@@ -652,8 +652,9 @@ user can retry. An update's quit goes on instead and leaves the journal to the n
 restoration fails, the service keeps desktop ownership and poster synchronization
 stays suspended until restoration succeeds; the picture API's temporary stand-in
 must not become a new poster original. Live desktop playback is independent of this
-poster handoff. A poster this journal recorded as a desktop's selection is kept by the
-poster ledger, with its original, until the journal lets it go
+poster handoff. The poster ledger keeps a poster and its original while either the
+live journal or its archive can put it back, so a replay after relaunch can restore the
+user's picture even when desktop writing is switched off
 ([the journal of originals](desktop-picture.md#the-journal-of-originals)).
 
 ## Background checks and recovery

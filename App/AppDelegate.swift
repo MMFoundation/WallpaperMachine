@@ -366,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     try self.startDesktopWallpaperSync()
                     // With the switch off, a poster the provider handed back is not kept.
                     self.desktopPictureRestoreSettled = false
-                    self.applyDesktopPicturePreference()
+                    self.applyDesktopPicturePreference(afterNativeRecovery: true)
                     self.spacePinning?.update()
                     self.spaceParking?.update()
                 }
@@ -1005,7 +1005,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     try await lockScreen?.start()
                     guard !shutdownInProgress else { return }
                     if lockScreen?.isRequested != true { try startDesktopWallpaperSync() }
-                    applyDesktopPicturePreference()
+                    applyDesktopPicturePreference(afterNativeRecovery: lockScreen != nil)
                 } catch {
                     lastError = error
                     AppLog.error("startup: Native wallpaper recovery failed: \(error.localizedDescription)")
