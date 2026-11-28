@@ -260,12 +260,13 @@ enum QuitRequestAnswer: Equatable {
 
     /// `running` is the mode of the quit in progress, `nil` when none is.
     ///
-    /// A request from the system always waits for the quit in progress, and anything waits
-    /// for a power-off quit, which ends the process either way.
+    /// A request from the system or an update always waits for the quit in progress (refusing
+    /// would cancel the logout or strand the update), and anything waits for a quit that does
+    /// not refuse, which ends the process either way. Only a second user's quit is refused.
     static func answer(finished: Bool, running: QuitMode?, request: QuitMode) -> QuitRequestAnswer {
         if finished { return .terminateNow }
         guard let running else { return .start }
-        return request == .powerOff || running == .powerOff ? .wait : .refuse
+        return request.refusesUnrestored && running.refusesUnrestored ? .refuse : .wait
     }
 }
 

@@ -509,6 +509,15 @@ final class QuitRequestAnswerTests: XCTestCase {
         XCTAssertEqual(answer(running: .powerOff, request: .interactive), .wait,
                        "the process is leaving either way, and refusing would cancel the system's request")
     }
+
+    /// Sparkle asks once and then waits for the app to exit: a refused request would leave the
+    /// update stranded if the user's quit that was running is then refused too.
+    func testAnUpdateDuringAUsersQuitWaitsInsteadOfBeingRefused() {
+        XCTAssertEqual(answer(running: .interactive, request: .handover), .wait)
+        XCTAssertEqual(answer(running: .handover, request: .interactive), .wait,
+                       "an update's quit never refuses, so the process is leaving either way")
+        XCTAssertEqual(answer(running: .handover, request: .powerOff), .wait)
+    }
 }
 
 final class FirstResultTests: XCTestCase {

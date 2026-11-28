@@ -148,9 +148,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var stalledQuitStages: [String] = []
     /// How the quit that is running, or ran last, behaves. Chosen when it starts.
     private var quitMode = QuitMode.interactive
-    /// A logout, restart or shutdown asked to quit while a user's quit was running. That quit
-    /// must then not be refused, because the system would take the refusal as its own.
-    private var powerOffJoinedQuit = false
+    /// A logout, restart or shutdown, or an update, asked to quit while a user's quit was running.
+    /// That quit must then not be refused: the system would take the refusal as its own, and an
+    /// update would wait for an exit that never comes. A logout outranks an update.
+    private var joinedQuitMode: QuitMode?
     /// Turns SIGTERM and SIGHUP into a quit; started once launching has finished.
     private var terminationSignals: TerminationSignalRelay?
     /// The signal that asked for the quit being requested, until `applicationShouldTerminate`
@@ -1485,9 +1486,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             AppLog.info("quit: already in progress, this request is refused")
             return .terminateCancel
         case .wait:
-            // Refusing would cancel a logout, restart or shutdown. The quit that is running
-            // replies, and if it would have been refused it goes on instead (see the retry below).
-            if quitMode == .interactive { powerOffJoinedQuit = true }
+            // Refusing would cancel a logout, restart or shutdown, or strand an update. The quit
+            // that is running replies, and if it would have been refused it goes on instead (see
+            // the retry below).
+            if quitMode == .interactive, mode != .interactive {
+                joinedQuitMode = joinedQuitMode == .powerOff ? .powerOff : mode
+            }
             AppLog.info("quit: already in progress, this request waits for it")
             return .terminateLater
         case .start:
@@ -1496,7 +1500,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         shutdownInProgress = true
         quitMode = mode
-        powerOffJoinedQuit = false
+        joinedQuitMode = nil
         SessionLedger.shared?.markQuitting(reason: QuitReason.ledgerReason(for: reason, signal: signal))
         // A copy opened while this one quits waits for the library instead of handing over to it.
         InstanceLock.current?.setPhase(.quitting)
@@ -1517,12 +1521,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task {
             var supervisor = QuitSupervisor(mode: mode)
             var outcome = await runQuitStages(on: supervisor, restorer: wallpaperRestorer)
-            if case .cancel = outcome, powerOffJoinedQuit {
-                // The user's quit would have been refused, but the system has asked to leave
-                // in the meantime. Try again within its time limits and do not refuse.
-                AppLog.info("quit: a logout, restart or shutdown arrived during this quit; going on under its time limits")
-                quitMode = .powerOff
-                supervisor = QuitSupervisor(mode: .powerOff)
+            if case .cancel = outcome, let joined = joinedQuitMode {
+                // The user's quit would have been refused, but the system or an update has asked
+                // to leave in the meantime. Try again within its time limits and do not refuse.
+                AppLog.info(joined == .powerOff
+                    ? "quit: a logout, restart or shutdown arrived during this quit; going on under its time limits"
+                    : "quit: an update arrived during this quit; going on without refusing")
+                quitMode = joined
+                supervisor = QuitSupervisor(mode: joined)
                 outcome = await runQuitStages(on: supervisor, restorer: wallpaperRestorer)
             }
             switch outcome {

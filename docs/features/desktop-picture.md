@@ -560,7 +560,9 @@ A request to quit that arrives while another quit is running is answered by what
 a second user quit is refused, but a logout, restart or shutdown (and anything that arrives
 during one) waits for the quit that is running and is answered with it, so it is not
 refused either. If the user's quit then fails to restore, it is tried again once under the
-power-off limits instead of being refused.
+power-off limits instead of being refused. An update that asks while a user's quit runs is
+answered the same way, and a quit it joined is tried again as an update's
+([updates](#updates)) rather than refused.
 
 ### Updates
 
@@ -569,9 +571,11 @@ runs as `QuitMode.handover`. It has the user's quit's limits, so restoration has
 ever to finish, but like a logout it never refuses. A refused update quit leaves Sparkle
 waiting for an exit that never comes, and whatever refused it (an original that cannot be
 recovered) refuses the next update the same way, so no update could ever install. The new
-version starts at once, and its launch repair finishes from the journals whatever
-restoration left, as after a logout. The log says `quit: update; desktop restoration
-unfinished (…)`.
+version starts at once and takes over the journals as after a logout: the lock screen
+recovers its selection, and the poster journal keeps every original it has not put back.
+With desktop picture writing on, posters go on and that journal restores them at a later
+quit; with it off, the launch repair restores them at once. The log says `quit: update;
+desktop restoration unfinished (…)`.
 
 ## The native lock-screen provider and Space selection
 
