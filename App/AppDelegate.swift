@@ -1593,6 +1593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         [
             .init(name: "services") { [self] in tearDownServices(restoringDesktop: false) },
             .init(name: "imports") { [self] in await libraryImports.shutdown() },
+            .init(name: "links") { [self] in await linkedFolders.shutdown() },
             .init(name: "steamcmd") { [self] in await workshopStore.steamCMDSetup.shutdown() },
             .init(name: "workshop") { [self] in await workshopStore.downloader.shutdown() },
             .init(name: "pixiv") { [self] in await pixivStore.downloads.shutdown() },

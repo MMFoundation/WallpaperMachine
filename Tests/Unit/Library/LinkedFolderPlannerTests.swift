@@ -108,6 +108,23 @@ final class LinkedFolderPlannerTests: XCTestCase {
     XCTAssertEqual(LinkedFolderPlanner.dueRemovals(imported, installed: [before.libraryID, after.libraryID]), [before.libraryID])
   }
 
+  /// On the usual case-insensitive library volume, `Rain.mp4` and `rain.mp4` are one folder: a
+  /// rename that only changes case and an edit import over it, and nothing is left to remove.
+  func testCaseOnlyRenameAndEditRemovesNothing() {
+    let before = item("rain.mp4", fileID: 42)
+    var record = LinkedFolderRecord(entries: [entry(before)])
+    let after = item("Rain.mp4", size: 300, modified: 5, fileID: 42)
+    record = plan(record, scan([after]), mirror: true, installed: [before.libraryID]).record
+    let settled = plan(record, scan([after]), mirror: true, installed: [before.libraryID])
+    XCTAssertEqual(settled.imports, [after])
+
+    var imported = settled.record
+    LinkedFolderPlanner.recordImport(
+      after, importedID: after.libraryID, mirrorsDeletions: true, installedBefore: [before.libraryID], in: &imported)
+    XCTAssertEqual(imported.pendingRemovals, [])
+    XCTAssertEqual(LinkedFolderPlanner.dueRemovals(imported, installed: [after.libraryID]), [])
+  }
+
   func testDeletedFileKeepsItsWallpaperWithoutMirrorDeletions() {
     let rain = item("rain.mp4")
     let snow = item("snow.mp4")

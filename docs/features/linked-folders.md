@@ -74,7 +74,13 @@ placeholder): a recorded file is taken for deleted only when its name is gone.
   installed (a Workshop item, a hand import, another link's, or the same name in other case on
   a library volume that ignores case) is recorded and left alone, in the library and in the
   folder. The library is read after each scan, just before the import starts, and an import
-  that still lands on a wallpaper that was there before is not made the link's.
+  that still lands on a wallpaper that was there before is not made the link's. Ids are
+  compared without case throughout: a file renamed only in case keeps its wallpaper, and on a
+  case-sensitive library volume a file whose name differs only in case from an installed
+  wallpaper is left for a hand import rather than risk claiming the other one.
+
+Quitting waits for the link records still being saved, so an import that finished just before
+the quit is still known to be the link's at the next launch.
 
 The removal clears data the panel owns, so it runs while the control panel is open; removals
 found while it is closed wait in the record and run when it opens. A file whose wallpaper is

@@ -113,6 +113,13 @@ final class LinkedFolderCoordinator {
         dirty = []
     }
 
+    /// Stops following the folders and waits for the link records still being saved, so a quit
+    /// never leaves an imported wallpaper without the record that says the link owns it.
+    func shutdown() async {
+        stop()
+        _ = try? await saving?.value
+    }
+
     /// Looks at every linked folder: at launch, after wake, when a disk mounts or the library's
     /// drive comes back.
     func reconcileAll() {

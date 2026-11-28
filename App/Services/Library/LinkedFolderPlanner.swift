@@ -185,8 +185,11 @@ enum LinkedFolderPlanner {
                                              fileID: item.fileID, owned: owned)
         if let index, let previous {
             record.entries[index] = entry
-            if previous.owned, previous.libraryID != id, mirrorsDeletions,
-               !record.entries.contains(where: { $0.libraryID == previous.libraryID }) {
+            // Compared without case: on the usual case-insensitive library volume a rename that
+            // only changes case lands in the same folder, which must not then be removed.
+            let old = previous.libraryID.lowercased()
+            if previous.owned, old != id.lowercased(), mirrorsDeletions,
+               !record.entries.contains(where: { $0.libraryID.lowercased() == old }) {
                 record.pendingRemovals.append(previous.libraryID)
             }
         } else {
