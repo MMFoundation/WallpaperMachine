@@ -103,6 +103,35 @@ final class LockScreenWallpaperTests: XCTestCase {
     XCTAssertFalse(FileManager.default.fileExists(atPath: journal.path))
   }
 
+  /// The poster ledger keeps a poster the journal still names (it was on the desktop when the
+  /// lock screen took that selection over), so the journal says which picture files it writes back.
+  @MainActor
+  func testTheJournalNamesThePictureFilesItWritesBack() async throws {
+    let poster = root.appendingPathComponent("DesktopPosters/poster-1.jpg")
+    let configuration = try PropertyListSerialization.data(
+      fromPropertyList: ["type": "imageFile", "url": ["relative": poster.absoluteString]], format: .binary, options: 0)
+    var display = node("display-one")
+    display["Desktop"] = [
+      "Content": ["Choices": [["Provider": "com.apple.wallpaper.choice.image", "Configuration": configuration,
+                               "Files": [String]()]], "Shuffle": "$null"],
+      "LastSet": Date(timeIntervalSince1970: 1),
+    ]
+    var original = fixture()
+    original["Displays"] = ["one": display, "two": node("display-two")]
+    try write(original)
+    let folder = journal.deletingLastPathComponent()
+    let selection = LockScreenWallpaperSelection(
+      storeURL: store, journalURL: folder.appendingPathComponent(LockScreenWallpaperSelection.journalName), reload: {})
+
+    XCTAssertTrue(LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty)
+    try await selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: [])
+    XCTAssertEqual(LockScreenWallpaperSelection.journaledPictureURLs(in: folder), [poster.standardizedFileURL])
+
+    try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
+    XCTAssertTrue(LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty,
+                  "once restored, the journal no longer holds the poster back")
+  }
+
   @MainActor
   func testPartialRestoreKeepsBothOriginalsUntilAsyncConfirmation() async throws {
     let original = fixture()

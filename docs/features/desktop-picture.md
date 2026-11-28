@@ -363,6 +363,17 @@ originals journal. An extension used only for the screen saver does not block po
 Apple's default image, aerials and other user-selected providers remain valid originals.
 The store is read once per such pass, not for ordinary updates to journaled posters.
 
+The reverse can happen: the lock screen's own journal (`<support>/LockScreen/native-selection.plist`)
+records whatever a desktop showed when the lock screen took it over, and that can be a
+poster. When the lock screen restores, it puts that poster back, and this ledger then
+writes the poster's original over it. So a poster stays, with its entry, for as long as
+that journal names it, even while no desktop shows it: pruning it first left a poster
+nobody could restore, and quitting refused every time. The ledger reads that journal only
+when a pass would delete a poster, and again only once the file has changed (it can hold
+thousands of entries, one per Space macOS ever made). The journal's archive of released
+entries (`restored-native-selection.plist`) does not count: it is kept for good, and so
+would every poster it names.
+
 Another app can delete a picture it set, as a wallpaper app clearing out its old
 downloads does, and macOS refuses to show a file that does not exist. Writing that
 original back would fail on every attempt and so refuse every quit. So whenever a
@@ -372,7 +383,10 @@ desktop gets the next original whose file is still there, in the order above (an
 desktop on its display, its effective image, its journal, another display's). When none
 is left it gets macOS's default picture
 (`/System/Library/CoreServices/DefaultDesktop.heic`, written as the file that link points
-to). `AppLog` records the missing file and what was put back instead. Only a definite "no
+to). `AppLog` records the missing file and what was put back instead. A poster with no
+journal entry at all (one an earlier version pruned while the lock screen's journal still
+named it, or one that journal's archive puts back) takes the same fallbacks: no retry
+could find its original, so it never refuses a quit. Only a definite "no
 such file" counts. A file the app may not look at, such as one in a folder macOS's
 privacy protection covers, is written back as before. Files are looked at only while a
 desktop is being put back, never for each poster.

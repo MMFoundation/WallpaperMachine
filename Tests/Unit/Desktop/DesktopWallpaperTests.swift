@@ -70,6 +70,9 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
         inFlight.removeAll()
     }
     func referencedPictureURLs(targets: [DesktopPictureTarget]) -> Set<URL> { persistedPictures }
+    /// What the lock screen's journal would write back.
+    var journaled: Set<URL> = []
+    func journaledPictureURLs() -> Set<URL> { journaled }
 
     /// macOS's wallpaper store, which a per-Space write changes along with the picture.
     var store: Data?
@@ -591,6 +594,61 @@ final class DesktopWallpaperTests: XCTestCase {
         }
         XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
         XCTAssertTrue(try posterNames().isEmpty)
+    }
+
+    /// The lock-screen journal can put back a poster this ledger has already pruned, so its
+    /// file and its entry are gone and no desktop shows a picture of the user's. No retry can
+    /// find an original for it, so the quit puts back macOS's default picture instead of
+    /// refusing this quit and every later one (and with them every update).
+    @MainActor
+    func testAPrunedPosterPutBackByAnotherJournalGivesWayToTheMacOSDefaultPicture() async throws {
+        let pruned = root.appendingPathComponent("poster-pruned.jpg")
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: .poster(pruned), two: .poster(pruned)]
+        let system = root.appendingPathComponent("System", isDirectory: true)
+        let picture = system.appendingPathComponent("Default.heic")
+        let link = system.appendingPathComponent("DefaultDesktop.heic")
+        try FileManager.default.createDirectory(at: system, withIntermediateDirectories: true)
+        try Data([0]).write(to: picture)
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: picture)
+        let sync = try DesktopWallpaperSync(folder: root, workspace: workspace, surfaces: { [] },
+                                            frameCenter: NotificationCenter(), systemDefaultPicture: link)
+
+        try await sync.restoreForTermination(wait: {})
+
+        for target in [one, two] {
+            XCTAssertEqual(workspace.pictures[target]?.url, picture.resolvingSymlinksInPath())
+        }
+    }
+
+    /// The root of the case above: the lock screen journaled a poster as the selection it took
+    /// over, and this ledger must keep that poster and its original while the journal still
+    /// names it, however long no desktop shows it. When the lock screen puts it back, the
+    /// user's own picture goes over it; once the journal lets go, the poster is pruned.
+    @MainActor
+    func testAPosterTheLockScreenJournalStillNamesKeepsItsOriginalUntilItIsRestored() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        let user = original("user")
+        workspace.pictures = [one: user]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        let poster = try XCTUnwrap(workspace.pictures[one]?.url)
+        XCTAssertNotEqual(poster, user.url)
+
+        // The lock screen takes the desktop over and journals the poster it found there.
+        workspace.journaled = [poster]
+        workspace.pictures[one] = try DesktopSpaceWallpaperAPI.decodePicture([:])
+        try await ledger.synchronize(posters: [:], liveDisplays: ["1"])
+        XCTAssertEqual(try posterNames(), [poster.lastPathComponent], "a pass that does not show it must not prune it")
+
+        // Its restore puts the poster back and lets go of it; the ledger then restores the user's picture.
+        workspace.pictures[one] = .poster(poster)
+        workspace.journaled = []
+        try await ledger.restoreAll()
+
+        XCTAssertEqual(workspace.pictures[one], user)
+        XCTAssertTrue(try posterNames().isEmpty)
+        XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
     }
 
     /// Only a file that is certainly gone gives way. One the app may not look at, as in a

@@ -49,6 +49,9 @@ protocol DesktopPictureWorkspace {
     func replaceStore(_ data: Data, expected: Data) throws
     /// Has WallpaperAgent load the store, which it reads only as it starts.
     func reloadStore() async throws
+    /// Picture files another journal of originals (the lock screen's) will write back when it
+    /// restores. A poster among them is still in use, whatever the desktops show now.
+    func journaledPictureURLs() -> Set<URL>
 }
 
 extension DesktopPictureWorkspace {
@@ -57,6 +60,7 @@ extension DesktopPictureWorkspace {
     func storeContents() throws -> Data? { nil }
     func replaceStore(_ data: Data, expected: Data) throws {}
     func reloadStore() async throws {}
+    func journaledPictureURLs() -> Set<URL> { [] }
 }
 
 @MainActor
@@ -513,6 +517,10 @@ final class DesktopWallpaperLedger {
     /// does not exist, so writing such an original would fail on every attempt
     /// and refuse every quit. It gives way to the display's fallback and, when
     /// no original is left at all, to macOS's default picture.
+    ///
+    /// The same holds for a poster with no journal entry (one an earlier version
+    /// pruned while the lock screen's journal still named it): no retry can
+    /// recover an original for it, so it never refuses the quit either.
     private func restore(target: DesktopPictureTarget, fallbacks: () -> [String: DesktopPicture]) async throws {
         try Task.checkCancellation()
         guard let current = try workspace.currentPicture(target: target),
@@ -529,14 +537,16 @@ final class DesktopWallpaperLedger {
         let standIn: String
         if let chosen = fallbacks()[target.display] {
             (original, standIn) = (chosen, "another desktop's original")
-        } else if named != nil, let systemDefault = systemDefault() {
+        } else if let systemDefault = systemDefault() {
             (original, standIn) = (systemDefault, "macOS's default picture")
         } else {
             throw Failure.originalUnavailable
         }
-        if let named, reportedStandIns[target] != original.url {
+        let lost = named.map { "no longer exists (\($0.url.path))" }
+            ?? (journaled == nil ? "was never recorded for poster \(current.url.lastPathComponent)" : nil)
+        if let lost, reportedStandIns[target] != original.url {
             reportedStandIns[target] = original.url
-            AppLog.warn("Desktop picture: the original of display \(target.display), desktop \(target.space ?? "current") no longer exists (\(named.url.path)); putting back \(standIn) \(original.url.path) instead")
+            AppLog.warn("Desktop picture: the original of display \(target.display), desktop \(target.space ?? "current") \(lost); putting back \(standIn) \(original.url.path) instead")
         }
         try recordWritten(original.url)
         try await workspace.setPicture(original, target: target)
@@ -622,7 +632,9 @@ final class DesktopWallpaperLedger {
     /// goes. Anywhere else an unseen desktop may still show one, so only posters
     /// older than the newest `retainedPostersPerIncompleteDisplay` go. A poster
     /// a readable desktop shows is never deleted, and entries of the legacy
-    /// journal, which name no display, are left alone.
+    /// journal, which name no display, are left alone. Nor is a poster the
+    /// lock screen's journal still names, with its entry: that journal puts the
+    /// poster back when it restores, and only this entry knows what was under it.
     private func removeUnreferencedPosters(targets: [DesktopPictureTarget]) throws {
         var targeted = Set<String>(), incomplete = Set<String>(), referenced = Set<String>()
         // A native-provider shutdown reloads WallpaperAgent asynchronously.
@@ -663,6 +675,14 @@ final class DesktopWallpaperLedger {
                 .map { $0.name }
             obsolete += newestFirst.dropFirst(Self.retainedPostersPerIncompleteDisplay)
                 .filter { !referenced.contains($0) }
+        }
+        // The lock screen journals the selection it takes over, a poster included, and puts it
+        // back when it restores; this ledger then writes the poster's original over it. Deleting
+        // that poster and its entry first would leave a poster no one can restore. Asked only
+        // when something would go, so ordinary passes do not read that journal.
+        if !obsolete.isEmpty {
+            let journaled = Set(workspace.journaledPictureURLs().filter { entry(for: $0) != nil }.map(\.lastPathComponent))
+            obsolete.removeAll { journaled.contains($0) }
         }
         var removed = false
         var firstError: Error?

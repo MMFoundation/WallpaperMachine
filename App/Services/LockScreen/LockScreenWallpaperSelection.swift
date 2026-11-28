@@ -64,8 +64,46 @@ final class LockScreenWallpaperSelection {
     self.init(
       storeURL: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
         "Library/Application Support/com.apple.wallpaper/Store/Index.plist"),
-      journalURL: folder.appendingPathComponent("native-selection.plist"),
+      journalURL: folder.appendingPathComponent(Self.journalName),
       reload: { try await coordinator.reload() }, coordinator: coordinator)
+  }
+
+  static let journalName = "native-selection.plist"
+
+  /// The picture files the journal in `folder` writes back when it restores, read from disk so
+  /// the answer does not depend on which service started first. A poster can be among them: it
+  /// was on the desktop when the lock screen took that selection over, and the poster ledger
+  /// must keep it and its original until this journal has restored it (see
+  /// `DesktopWallpaperLedger.removeUnreferencedPosters`). The archive of released entries is
+  /// left out: it is kept for good, and counting it would keep every such poster for good.
+  /// Empty for a missing or unreadable journal.
+  static func journaledPictureURLs(in folder: URL) -> Set<URL> {
+    guard let data = try? Data(contentsOf: folder.appendingPathComponent(journalName)),
+      let entries = try? PropertyListDecoder().decode([Entry].self, from: data)
+    else { return [] }
+    var urls = Set<URL>()
+    for entry in entries {
+      for node in [entry.original, entry.linkedOriginal, entry.inheritedOriginal].compactMap({ $0 }) {
+        guard let value = try? PropertyListSerialization.propertyList(from: node, format: nil) else { continue }
+        collectPictureURLs(in: value, into: &urls)
+      }
+    }
+    return urls
+  }
+
+  private static func collectPictureURLs(in value: Any, into urls: inout Set<URL>) {
+    if let choice = value as? [String: Any], choice["Provider"] as? String == "com.apple.wallpaper.choice.image",
+      let data = choice["Configuration"] as? Data,
+      let configuration = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+      let relative = (configuration["url"] as? [String: Any])?["relative"] as? String,
+      let url = URL(string: relative), url.isFileURL
+    {
+      urls.insert(url.standardizedFileURL)
+    } else if let dictionary = value as? [String: Any] {
+      for child in dictionary.values { collectPictureURLs(in: child, into: &urls) }
+    } else if let array = value as? [Any] {
+      for child in array { collectPictureURLs(in: child, into: &urls) }
+    }
   }
 
   init(

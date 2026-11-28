@@ -76,6 +76,8 @@ enum ClientPaths {
     /// The posters installed as the macOS desktop picture and the journal of the originals they
     /// replaced (docs/features/desktop-picture.md).
     static var desktopPostersURL: URL { supportURL.appendingPathComponent("DesktopPosters") }
+    /// The lock screen's journal of the native selections it replaced (docs/features/lock-screen.md).
+    static var lockScreenURL: URL { supportURL.appendingPathComponent("LockScreen") }
     /// What running scenes last reported about being drawn, for the Compatibility card.
     static var sceneDrawVerdictsURL: URL { supportURL.appendingPathComponent("SceneDrawVerdicts.json") }
     /// Each wallpaper's measured energy use.
