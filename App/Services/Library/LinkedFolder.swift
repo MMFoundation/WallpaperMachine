@@ -68,6 +68,9 @@ struct LinkedFolderRecord: Codable, Equatable, Sendable {
     /// Library items due to be removed that no file stands for any more: the item a renamed and
     /// changed file was imported anew from.
     var pendingRemovals: [String] = []
+    /// Replaced items held for the user's go-ahead: one import batch replaced enough of the
+    /// link's wallpapers that removing the old ones counts as a mass removal.
+    var heldRemovals: [String] = []
 }
 
 /// A file's size and modification time, enough to tell that it changed or is still being written.

@@ -79,6 +79,13 @@ placeholder): a recorded file is taken for deleted only when its name is gone.
   case-sensitive library volume a file whose name differs only in case from an installed
   wallpaper is left for a hand import rather than risk claiming the other one.
 
+Files are followed by their file id before their name: two files that swap names keep their own
+wallpapers. Renamed and changed files that replace many of a link's wallpapers at once are held
+for **Move to Trash** or **Keep** like departed files, and a file back under a name whose
+wallpaper was about to be replaced keeps that wallpaper and is imported over it once settled.
+A removal waits whenever the folder changed since the look that decided it; the next look
+decides again. A record that could not be read is read again at the next edit.
+
 Quitting waits for the link records still being saved, so an import that finished just before
 the quit is still known to be the link's at the next launch.
 

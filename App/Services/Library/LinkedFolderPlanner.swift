@@ -40,7 +40,14 @@ enum LinkedFolderPlanner {
         var gone: [LinkedFolderRecord.Entry] = []
         // A leaving item that is no longer installed has been removed: its entry is done.
         for entry in record.entries where !(entry.state == .leaving && !installed.contains(entry.libraryID)) {
-            if contents.present.contains(entry.path) {
+            // A path whose file is now one this entry's file moved away from (two files swapped
+            // names) is matched by file id below, so each wallpaper stays with its own file. A new
+            // file saved over the path (another id, found nowhere else) is still a change of it.
+            if contents.present.contains(entry.path),
+               !(entry.fileID.map { mine in
+                   items[entry.path]?.fileID.map { $0 != mine } == true
+                       && contents.items.contains { $0.fileID == mine && $0.path != entry.path }
+               } ?? false) {
                 kept.append(entry)
             } else {
                 gone.append(entry)
@@ -87,6 +94,7 @@ enum LinkedFolderPlanner {
                 next.pending[item.path] = nil
             } else if settled(item, in: &next, plan: &plan) {
                 plan.imports.append(item)
+                claimed.insert(item.libraryID.lowercased())
             }
             entries.append(entry)
         }
@@ -95,9 +103,17 @@ enum LinkedFolderPlanner {
             let key = item.libraryID.lowercased()
             if let index = next.pendingRemovals.firstIndex(where: { $0.lowercased() == key }),
                installed.contains(next.pendingRemovals[index]) {
-                // Back before its wallpaper was removed: it stays.
+                // Back before its wallpaper was removed: it stays, and is imported over it once
+                // settled, since its contents may differ from what the library holds.
                 let id = next.pendingRemovals.remove(at: index)
-                entries.append(.init(path: item.path, libraryID: id, stamp: item.stamp, fileID: item.fileID, owned: true))
+                entries.append(.init(path: item.path, libraryID: id, stamp: unknownStamp, fileID: item.fileID, owned: true))
+                claimed.insert(key)
+            } else if let index = next.heldRemovals.firstIndex(where: { $0.lowercased() == key }),
+                      installed.contains(next.heldRemovals[index]) {
+                // Back while its removal was held: it stays, is no longer asked about, and is
+                // imported over it once settled.
+                let id = next.heldRemovals.remove(at: index)
+                entries.append(.init(path: item.path, libraryID: id, stamp: unknownStamp, fileID: item.fileID, owned: true))
                 claimed.insert(key)
             } else if installedKeys.contains(key) || claimed.contains(key) {
                 // Somebody else's item of the same id: recorded, never replaced or removed.
@@ -106,7 +122,9 @@ enum LinkedFolderPlanner {
                 claimed.insert(key)
                 next.pending[item.path] = nil
             } else if settled(item, in: &next, plan: &plan) {
+                // Reserved, so a second new file of the same id in this look is not imported over it.
                 plan.imports.append(item)
+                claimed.insert(key)
             }
         }
 
@@ -140,6 +158,10 @@ enum LinkedFolderPlanner {
         next.pendingRemovals = mirrorsDeletions ? next.pendingRemovals.filter {
             installed.contains($0) && !referenced.contains($0) && seen.insert($0).inserted
         } : []
+        next.heldRemovals = mirrorsDeletions ? next.heldRemovals.filter {
+            installed.contains($0) && !referenced.contains($0) && seen.insert($0).inserted
+        } : []
+        plan.held += next.heldRemovals
         next.entries = entries.sorted { $0.path < $1.path }
         plan.removals = dueRemovals(next, installed: installed)
         plan.record = next
@@ -148,12 +170,24 @@ enum LinkedFolderPlanner {
 
     /// The library items `record` has decided to remove and that are still installed: the
     /// wallpapers of files that left, and items no file stands for any more.
+    /// Ids are matched to the library's own spelling: on a volume that ignores case, a file
+    /// renamed only in case and imported again keeps the folder name the library already had.
+    /// One that matches several installed items only by case is left alone.
     static func dueRemovals(_ record: LinkedFolderRecord, installed: Set<String>) -> [String] {
-        let keep = Set(record.entries.filter { $0.state != .leaving }.map(\.libraryID))
+        let keep = Set(record.entries.filter { $0.state != .leaving }.map { $0.libraryID.lowercased() })
+        let byKey = Dictionary(grouping: installed, by: { $0.lowercased() })
         var seen = Set<String>()
         return (record.entries.filter { $0.state == .leaving && $0.owned }.map(\.libraryID) + record.pendingRemovals)
-            .filter { installed.contains($0) && !keep.contains($0) && seen.insert($0).inserted }
+            .compactMap { id -> String? in
+                if installed.contains(id) { return id }
+                let matches = byKey[id.lowercased()] ?? []
+                return matches.count == 1 ? matches[0] : nil
+            }
+            .filter { !keep.contains($0.lowercased()) && seen.insert($0).inserted }
     }
+
+    /// Never equal to a file's stamp: an entry that has it is imported over at its next settled look.
+    static let unknownStamp = LinkedFolderStamp(size: -1, modified: 0)
 
     /// Whether removing `count` of a link's `total` wallpapers at once needs the user's go-ahead.
     /// A single removal never does, however small the folder.
@@ -214,9 +248,27 @@ enum LinkedFolderPlanner {
         case notReached
     }
 
+    /// Removals one import batch queued for the items renamed and changed files replaced
+    /// (`added`) are weighed with every other removal not yet confirmed. When together they need
+    /// the user's go-ahead, the new ones are held as departed files' are.
+    static func holdReplacements(_ added: [String], in record: inout LinkedFolderRecord) {
+        guard !added.isEmpty else { return }
+        let unconfirmed = record.entries.filter { $0.owned && $0.state == .leaving && $0.removalConfirmed != true }.count
+        let total = record.entries.filter {
+            $0.owned && ($0.state == .present || ($0.state == .leaving && $0.removalConfirmed != true))
+        }.count
+        guard isMassRemoval(record.pendingRemovals.count + unconfirmed, of: total) else { return }
+        let held = Set(added)
+        record.pendingRemovals.removeAll { held.contains($0) }
+        record.heldRemovals += added.filter { !record.heldRemovals.contains($0) }
+    }
+
     /// The user confirmed held removals: those files' wallpapers are due to be removed.
     static func confirmHeld(_ ids: [String], in record: inout LinkedFolderRecord) {
         let confirmed = Set(ids)
+        let replaced = record.heldRemovals.filter { confirmed.contains($0) }
+        record.heldRemovals.removeAll { confirmed.contains($0) }
+        record.pendingRemovals += replaced.filter { !record.pendingRemovals.contains($0) }
         for index in record.entries.indices
         where confirmed.contains(record.entries[index].libraryID) && record.entries[index].owned
             && record.entries[index].state == .present {
@@ -228,6 +280,7 @@ enum LinkedFolderPlanner {
     /// The user kept held items: they stay in the library and are never removed for this folder.
     static func keepHeld(_ ids: [String], in record: inout LinkedFolderRecord) {
         let keep = Set(ids)
+        record.heldRemovals.removeAll { keep.contains($0) }
         for index in record.entries.indices
         where keep.contains(record.entries[index].libraryID) && record.entries[index].state == .present {
             record.entries[index].state = .missing
@@ -240,6 +293,7 @@ enum LinkedFolderPlanner {
             record.entries[index].state = .missing
         }
         record.pendingRemovals = []
+        record.heldRemovals = []
     }
 
     /// `ids` left the library: their leaving entries and queued removals are done.

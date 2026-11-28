@@ -34,7 +34,8 @@ final class LinkedFolderScannerTests: XCTestCase {
 
   private func contents() throws -> LinkedFolderScan.Contents {
     guard case .contents(let contents) = LinkedFolderScanner.scanNow(at: folder) else {
-      throw XCTSkip("the folder could not be scanned")
+      XCTFail("the folder could not be scanned")
+      throw CocoaError(.fileReadUnknown)
     }
     return contents
   }

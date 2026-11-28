@@ -60,6 +60,9 @@ final class LinkedFolderCoordinator {
     @ObservationIgnored private var rechecks: [UUID: Task<Void, Never>] = [:]
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var saving: Task<Void, Error>?
+    /// Changes the watcher reported for each folder, so a removal waiting for its turn can tell
+    /// that the folder changed meanwhile.
+    @ObservationIgnored private var changes: [UUID: UInt64] = [:]
     /// Why the saved links could not be read; while set nothing is saved over them.
     @ObservationIgnored private var loadFailure: Error?
     @ObservationIgnored private let home: URL
@@ -212,10 +215,13 @@ final class LinkedFolderCoordinator {
 
     private func reconcile(_ id: UUID) async {
         guard let folder = folders.first(where: { $0.id == id }) else { return }
-        guard installedIDs?() != nil else {
-            recheck(id)  // the library is not read yet
-            return
-        }
+        // The library is away (its drive is disconnected) or not read: nothing to compare with.
+        // No recheck: the drive's return and every launch, wake and mount look at all folders.
+        guard installedIDs?() != nil else { return }
+        // Watched before the scan, so a file that arrives while it runs still sends an event: the
+        // watcher reports only what happens after it starts.
+        if FileManager.default.fileExists(atPath: folder.url.path) { startWatching(id, at: folder.url) }
+        let changesAtScan = changes[id, default: 0]
         let scan = await scanner.scan(folder)
         // Read after the scan and with no wait before the import starts, so a file another import
         // put in the library meanwhile is seen as somebody else's, never claimed by this link.
@@ -236,7 +242,7 @@ final class LinkedFolderCoordinator {
         }
         startWatching(id, at: contents.folder)
         if !plan.imports.isEmpty { await runImports(plan.imports, from: contents.folder, installedBefore: installed, for: id) }
-        await runRemovals(for: id)
+        await runRemovals(for: id, unchangedSince: changesAtScan)
         if plan.needsRecheck { recheck(id) }
     }
 
@@ -253,7 +259,15 @@ final class LinkedFolderCoordinator {
             return recheck(id)
         }
         var notReached = false
+        var held: [String] = []
         commit(id) { link in
+            let queuedBefore = Set(link.record.pendingRemovals)
+            defer {
+                // Old items of renamed and changed files are weighed like departed files' wallpapers.
+                LinkedFolderPlanner.holdReplacements(
+                    link.record.pendingRemovals.filter { !queuedBefore.contains($0) }, in: &link.record)
+                held = link.record.heldRemovals
+            }
             for item in items {
                 switch LinkedFolderPlanner.outcome(of: item, in: report) {
                 case .imported(let libraryID):
@@ -266,6 +280,11 @@ final class LinkedFolderCoordinator {
                     notReached = true
                 }
             }
+        }
+        if !held.isEmpty {
+            var status = self.status(of: id)
+            status.held += held.filter { !status.held.contains($0) }
+            statuses[id] = status
         }
         statuses[id]?.failure = report.failures.first
         if !report.failures.isEmpty {
@@ -284,15 +303,26 @@ final class LinkedFolderCoordinator {
 
     /// Removes what the link has due after any import of this look, so the item a renamed and
     /// changed file replaced goes in the same look.
-    private func runRemovals(for id: UUID) async {
+    private func runRemovals(for id: UUID, unchangedSince changesAtScan: UInt64) async {
+        // The folder changed since the scan this look is from (a file may be back): the look the
+        // change scheduled scans again before anything is removed.
+        let changed = { [weak self] in
+            guard let self else { return true }
+            return self.changes[id, default: 0] != changesAtScan || self.dirty.contains(id)
+        }
+        guard !changed() else { return }
         let due = dueRemovals(id)
         guard !due.isEmpty else { return }
         guard let remover else {
             AppLog.info("linked folders: \(due.count) removal(s) wait for the control panel to open")
             return
         }
+        // The same while the removal waits for its turn in the panel's queue.
         do {
-            let removed = Set(try await remover(due) { [weak self] in Set(self?.dueRemovals(id) ?? []) })
+            let removed = Set(try await remover(due) { [weak self] in
+                guard let self, !changed() else { return [] }
+                return Set(self.dueRemovals(id))
+            })
             commit(id) { LinkedFolderPlanner.recordRemoved(removed, in: &$0.record) }
             // A batch cut at the panel's limit goes on; one that moved nothing waits for a look.
             if !removed.isEmpty, !dueRemovals(id).isEmpty { schedule(id) }
@@ -319,7 +349,11 @@ final class LinkedFolderCoordinator {
     private func startWatching(_ id: UUID, at folder: URL) {
         guard watchedPaths[id] != folder.path else { return }
         stopWatching(id)
-        guard let watcher = watch(folder, { [weak self] in self?.schedule(id) }) else { return }
+        guard let watcher = watch(folder, { [weak self] in
+            guard let self else { return }
+            self.changes[id, default: 0] &+= 1
+            self.schedule(id)
+        }) else { return }
         watchers[id] = watcher
         watchedPaths[id] = folder.path
     }
@@ -345,11 +379,14 @@ final class LinkedFolderCoordinator {
 
     // MARK: Persistence
 
+    /// Reads the links once, and again while they could not be read: a record the user repaired
+    /// is picked up at the next edit, and none is saved over until then.
     private func loadIfNeeded() {
-        guard !loaded else { return }
+        guard !loaded || loadFailure != nil else { return }
         loaded = true
         do {
             folders = try store.load()
+            loadFailure = nil
         } catch {
             loadFailure = error
             AppLog.error("linked folders: \(store.file.lastPathComponent) could not be read, so links are not changed or saved: \(error.localizedDescription)")
@@ -358,24 +395,30 @@ final class LinkedFolderCoordinator {
 
     private func update(_ id: UUID, _ change: (inout LinkedFolder) -> Void) async throws {
         loadIfNeeded()
-        guard let index = folders.firstIndex(where: { $0.id == id }) else {
+        guard folders.contains(where: { $0.id == id }) else {
             throw WallpaperActionError(message: String(localized: "This folder is no longer linked."))
         }
-        try await transact { change(&$0[index]) }
+        try await transact { links in
+            if let index = links.firstIndex(where: { $0.id == id }) { change(&links[index]) }
+        }
     }
 
     /// Applies a change the user made only once it is saved; a failed save leaves the links as
     /// they were, so the action can simply be tried again.
+    ///
+    /// The change is saved on a copy, then applied to the links as they are by then: what a look
+    /// recorded while the save ran is kept whether the save succeeds or fails.
     private func transact(_ change: (inout [LinkedFolder]) -> Void) async throws {
         loadIfNeeded()
         if let loadFailure { throw loadFailure }
-        let previous = folders
+        var candidate = folders
+        change(&candidate)
+        try await enqueueSave(candidate).value
+        let before = folders
         change(&folders)
-        do {
-            try await save()
-        } catch {
-            folders = previous
-            throw error
+        if folders != candidate, folders != before {
+            let write = enqueueSave()
+            Task { do { try await write.value } catch { AppLog.warn("linked folders: could not save: \(error.localizedDescription)") } }
         }
     }
 
@@ -394,9 +437,9 @@ final class LinkedFolderCoordinator {
     /// Writes the links off the main actor, one save after another so the newest is the last.
     private func save() async throws { try await enqueueSave().value }
 
-    private func enqueueSave() -> Task<Void, Error> {
+    private func enqueueSave(_ links: [LinkedFolder]? = nil) -> Task<Void, Error> {
         let previous = saving
-        let snapshot = folders
+        let snapshot = links ?? folders
         let store = self.store
         let write = Task.detached(priority: .utility) {
             _ = try? await previous?.value

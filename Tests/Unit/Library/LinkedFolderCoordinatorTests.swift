@@ -45,6 +45,8 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
   private var scanner: FakeScanner!
   private var imported: [[String]] = []
   private var watched: [String] = []
+  /// What each watched folder's watcher calls when the folder changes.
+  private var changeHandlers: [String: @MainActor () -> Void] = [:]
   private var duringImport: (@MainActor () async throws -> Void)?
   private var installed: Set<String> = []
   private var coordinator: LinkedFolderCoordinator!
@@ -57,11 +59,13 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
     imported = []
     installed = []
     watched = []
+    changeHandlers = [:]
     duringImport = nil
     coordinator = LinkedFolderCoordinator(
       store: LinkedFolderStore(file: root.appendingPathComponent("LinkedFolders.json")),
-      scanner: scanner, watch: { [unowned self] url, _ in
+      scanner: scanner, watch: { [unowned self] url, onChange in
         watched.append(url.lastPathComponent)
+        changeHandlers[url.lastPathComponent] = onChange
         return FakeWatcher()
       },
       sleep: { _ in try await Task.sleep(for: .seconds(3600)) },
@@ -241,6 +245,67 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
     XCTAssertTrue(installed.isSuperset(of: ["local-c.mp4", "local-d.mp4"]))
   }
 
+  /// A file that comes back while its removal waits for the panel's turn keeps its wallpaper:
+  /// the folder changed, so nothing goes and the look that change scheduled decides again.
+  func testFolderChangeWhileARemovalWaitsCallsItOff() async throws {
+    scanner.next = contents(["a.mp4", "b.mp4", "c.mp4", "d.mp4", "e.mp4"])
+    let id = try await link(mirror: true)
+    await look()
+    scanner.next = contents(["b.mp4", "c.mp4", "d.mp4", "e.mp4"])
+    await look()
+
+    var removed: [[String]] = []
+    coordinator.remover = { [unowned self] ids, stillDue in
+      scanner.next = contents(["a.mp4", "b.mp4", "c.mp4", "d.mp4", "e.mp4"])
+      changeHandlers["Folder"]?()
+      let due = ids.filter(stillDue().contains)
+      removed.append(due)
+      installed.subtract(due)
+      return due
+    }
+    await coordinator.waitForIdle()
+    XCTAssertEqual(removed, [[]])
+    XCTAssertTrue(installed.contains("local-a.mp4"))
+    XCTAssertEqual(coordinator.folders.first { $0.id == id }?.record.entries.first { $0.path == "a.mp4" }?.state, .present)
+  }
+
+  /// The folder is watched before its first scan, so a file that arrives while the scan runs is
+  /// still reported.
+  func testFolderIsWatchedBeforeItsFirstScan() async throws {
+    var watchedDuringScan: [String] = []
+    scanner.whileScanning = { [unowned self] in watchedDuringScan = watched }
+    scanner.next = contents([])
+    _ = try await link()
+    XCTAssertEqual(watchedDuringScan, ["Folder"])
+  }
+
+  /// While the library is away nothing is looked at again on a timer: its drive's return looks
+  /// at every folder anyway.
+  func testNothingIsRecheckedWhileTheLibraryIsAway() async throws {
+    final class Count: @unchecked Sendable {
+      private let lock = NSLock()
+      private var count = 0
+      func add() { lock.withLock { count += 1 } }
+      var value: Int { lock.withLock { count } }
+    }
+    let sleeps = Count()
+    coordinator.stop()
+    coordinator = LinkedFolderCoordinator(
+      store: LinkedFolderStore(file: root.appendingPathComponent("Away.json")),
+      scanner: scanner, watch: { _, _ in FakeWatcher() },
+      sleep: { _ in
+        sleeps.add()
+        try await Task.sleep(for: .seconds(3600))
+      },
+      notifications: NotificationCenter())
+    coordinator.installedIDs = { nil }
+    scanner.next = contents(["a.mp4"])
+    _ = try await link()
+    await look()
+    for _ in 0..<20 { await Task.yield() }
+    XCTAssertEqual(sleeps.value, 0)
+  }
+
   func testMissingFolderIsWatchedThroughItsParentUntilItIsBack() async throws {
     scanner.next = .unavailable
     _ = try await link()
@@ -307,5 +372,11 @@ final class LinkedFolderCoordinatorTests: XCTestCase {
     } catch {}
     var isDirectory: ObjCBool = false
     XCTAssertTrue(FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory) && isDirectory.boolValue)
+
+    // Once the record can be read again, the next edit reads it and goes through.
+    try FileManager.default.removeItem(at: file)
+    _ = try await blocked.add(folder, library: root.appendingPathComponent("Library"), support: root.appendingPathComponent("Support"))
+    XCTAssertEqual(try LinkedFolderStore(file: file).load().count, 1)
+    blocked.stop()
   }
 }

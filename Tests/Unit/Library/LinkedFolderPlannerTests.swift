@@ -108,6 +108,82 @@ final class LinkedFolderPlannerTests: XCTestCase {
     XCTAssertEqual(LinkedFolderPlanner.dueRemovals(imported, installed: [before.libraryID, after.libraryID]), [before.libraryID])
   }
 
+  /// Old items that renamed and changed files replaced count toward the mass-removal guard like
+  /// departed files' wallpapers: two of a link's three at once wait for the user's go-ahead.
+  func testManyReplacedItemsAreHeldForConfirmation() {
+    let names = ["a.mp4", "b.mp4", "c.mp4"]
+    var record = LinkedFolderRecord(entries: names.map { entry(item($0)) })
+    record.pendingRemovals = ["local-old-a.mp4", "local-old-b.mp4"]
+    LinkedFolderPlanner.holdReplacements(["local-old-a.mp4", "local-old-b.mp4"], in: &record)
+    XCTAssertEqual(record.pendingRemovals, [])
+    XCTAssertEqual(record.heldRemovals, ["local-old-a.mp4", "local-old-b.mp4"])
+    let installed: Set<String> = Set(names.map { "local-" + $0 } + ["local-old-a.mp4", "local-old-b.mp4"])
+    XCTAssertEqual(LinkedFolderPlanner.dueRemovals(record, installed: installed), [])
+    XCTAssertEqual(plan(record, scan(names.map { item($0) }), mirror: true, installed: installed).held,
+                   ["local-old-a.mp4", "local-old-b.mp4"])
+
+    LinkedFolderPlanner.confirmHeld(["local-old-a.mp4"], in: &record)
+    XCTAssertEqual(LinkedFolderPlanner.dueRemovals(record, installed: installed), ["local-old-a.mp4"])
+    LinkedFolderPlanner.keepHeld(["local-old-b.mp4"], in: &record)
+    XCTAssertEqual(record.heldRemovals, [])
+
+    var single = LinkedFolderRecord(entries: names.map { entry(item($0)) })
+    single.pendingRemovals = ["local-old-a.mp4"]
+    LinkedFolderPlanner.holdReplacements(["local-old-a.mp4"], in: &single)
+    XCTAssertEqual(single.pendingRemovals, ["local-old-a.mp4"], "a single replacement never waits")
+  }
+
+  /// Two new files of the same id in one look (names differing only in case, or two copies of
+  /// one Workshop project) import only the first; the second is not imported over it.
+  func testSecondNewFileOfTheSameIDIsNotImportedOverTheFirst() {
+    let upper = item("Rain.mp4"), lower = item("rain.mp4")
+    var record = LinkedFolderRecord()
+    record = plan(record, scan([upper, lower]), mirror: false, installed: []).record
+    let settled = plan(record, scan([upper, lower]), mirror: false, installed: [])
+    XCTAssertEqual(settled.imports, [upper])
+  }
+
+  /// Two files that swap names keep their own wallpapers: each is matched by its file id, not by
+  /// the path, so neither is imported over the other's wallpaper.
+  func testFilesThatSwappedNamesKeepTheirWallpapers() {
+    let a = item("a.mp4", size: 100, fileID: 1), b = item("b.mp4", size: 200, fileID: 2)
+    let record = LinkedFolderRecord(entries: [entry(a), entry(b)])
+    let nowA = item("a.mp4", size: 200, fileID: 2), nowB = item("b.mp4", size: 100, fileID: 1)
+    let result = plan(record, scan([nowA, nowB]), mirror: true, installed: [a.libraryID, b.libraryID])
+    XCTAssertEqual(result.imports, [])
+    XCTAssertEqual(result.removals, [])
+    XCTAssertEqual(result.record.entries.first { $0.path == "a.mp4" }?.libraryID, b.libraryID)
+    XCTAssertEqual(result.record.entries.first { $0.path == "b.mp4" }?.libraryID, a.libraryID)
+  }
+
+  /// A file back under the name its replaced wallpaper had keeps that wallpaper, and once settled
+  /// is imported over it: its contents may not be what the library holds.
+  func testFileBackChangedWhileItsReplacementRemovalWaitsIsImported() {
+    let storm = item("storm.mp4")
+    var record = LinkedFolderRecord(entries: [entry(storm)])
+    record.pendingRemovals = ["local-rain.mp4"]
+    let rain = item("rain.mp4", size: 999, modified: 9)
+    let installed: Set<String> = [storm.libraryID, "local-rain.mp4"]
+    let first = plan(record, scan([storm, rain]), mirror: true, installed: installed)
+    XCTAssertEqual(first.removals, [])
+    XCTAssertEqual(first.record.pendingRemovals, [])
+    let second = plan(first.record, scan([storm, rain]), mirror: true, installed: installed)
+    XCTAssertEqual(second.imports, [], "it is settled first, as any changed file is")
+    let third = plan(second.record, scan([storm, rain]), mirror: true, installed: installed)
+    XCTAssertEqual(third.imports, [rain])
+  }
+
+  /// A removal is matched to the library's own spelling: on a volume that ignores case, a file
+  /// renamed only in case kept the folder name the library already had.
+  func testDueRemovalUsesTheLibrarysSpelling() {
+    var leaving = entry(item("Rain.mp4"))
+    leaving.state = .leaving
+    let record = LinkedFolderRecord(entries: [leaving])
+    XCTAssertEqual(LinkedFolderPlanner.dueRemovals(record, installed: ["local-rain.mp4"]), ["local-rain.mp4"])
+    XCTAssertEqual(LinkedFolderPlanner.dueRemovals(record, installed: ["local-rain.mp4", "local-RAIN.mp4"]), [],
+                   "a match only by case among several is left alone")
+  }
+
   /// On the usual case-insensitive library volume, `Rain.mp4` and `rain.mp4` are one folder: a
   /// rename that only changes case and an edit import over it, and nothing is left to remove.
   func testCaseOnlyRenameAndEditRemovesNothing() {
