@@ -309,6 +309,22 @@ final class QuitSupervisorTests: XCTestCase {
 
     // MARK: Power off
 
+    /// The quit an update installer waits for: restoration that fails does not strand the
+    /// install, and the new version's launch repair finishes it.
+    func testAnUpdateQuitGoesOnWhenRestorationFailsInsteadOfStrandingTheInstall() async {
+        let supervisor = makeSupervisor(mode: .handover)
+
+        let outcome = await supervisor.run(
+            restoration: throwing("restore", StillRestoring()),
+            teardown: [stage("imports"), stage("bridge")])
+
+        XCTAssertEqual(outcome, .proceedUnrestored(
+            .restorationFailed("macOS is still restoring the desktop wallpaper."), stalled: []))
+        XCTAssertEqual(events, ["restore", "imports", "bridge"])
+        XCTAssertTrue(lines.contains { $0.hasPrefix("quit: update; desktop restoration unfinished") },
+                      "the log says the update left it to the journal: \(lines)")
+    }
+
     func testAPowerOffQuitGoesOnWhenRestorationFailsInsteadOfRefusingTheLogout() async {
         let supervisor = makeSupervisor(mode: .powerOff)
 
@@ -492,6 +508,15 @@ final class QuitRequestAnswerTests: XCTestCase {
         XCTAssertEqual(answer(running: .powerOff, request: .powerOff), .wait)
         XCTAssertEqual(answer(running: .powerOff, request: .interactive), .wait,
                        "the process is leaving either way, and refusing would cancel the system's request")
+    }
+
+    /// Sparkle asks once and then waits for the app to exit: a refused request would leave the
+    /// update stranded if the user's quit that was running is then refused too.
+    func testAnUpdateDuringAUsersQuitWaitsInsteadOfBeingRefused() {
+        XCTAssertEqual(answer(running: .interactive, request: .handover), .wait)
+        XCTAssertEqual(answer(running: .handover, request: .interactive), .wait,
+                       "an update's quit never refuses, so the process is leaving either way")
+        XCTAssertEqual(answer(running: .handover, request: .powerOff), .wait)
     }
 }
 

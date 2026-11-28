@@ -19,7 +19,8 @@ import Foundation
 /// the menu, the exit fuse) belongs to `AppDelegate`; this type only decides and logs.
 ///
 /// How strict it is depends on who asked (`QuitMode`). A user's quit can be refused when
-/// the desktop cannot be restored; the system's logout, restart or shutdown never is.
+/// the desktop cannot be restored; an update's, and the system's logout, restart or
+/// shutdown, never is.
 @MainActor
 final class QuitSupervisor {
     /// How long each part of a quit may take.
@@ -82,9 +83,10 @@ final class QuitSupervisor {
         /// Restoration is done and the app may exit. `stalled` names the stages that were
         /// left behind, in order.
         case proceed(stalled: [String])
-        /// The system is logging out, restarting or shutting down and the desktop was not
-        /// restored in time (or at all). The app may exit anyway: whatever is unrestored
-        /// stays in the originals journal. Only a `QuitMode.powerOff` quit ends this way.
+        /// An update is replacing the app, or the system is logging out, restarting or
+        /// shutting down, and the desktop was not restored in time (or at all). The app may
+        /// exit anyway: whatever is unrestored stays in the originals journal. Only a quit
+        /// whose mode does not refuse (`QuitMode.refusesUnrestored`) ends this way.
         case proceedUnrestored(Cancellation, stalled: [String])
         /// The desktop could not be restored in time, so the app keeps running.
         case cancel(Cancellation)
@@ -117,9 +119,9 @@ final class QuitSupervisor {
     /// Runs `restoration`, then the `teardown` stages in order.
     ///
     /// An interactive quit goes on only if restoration succeeds in time; otherwise it is
-    /// refused and nothing after it runs. A power-off quit goes on whatever happens to
-    /// restoration (see `Outcome.proceedUnrestored`), because refusing would cancel the
-    /// logout, restart or shutdown for everyone.
+    /// refused and nothing after it runs. A power-off or handover quit goes on whatever
+    /// happens to restoration (see `Outcome.proceedUnrestored`), because refusing would
+    /// cancel the logout, restart or shutdown for everyone, or strand the update.
     ///
     /// A teardown stage that throws is logged and the quit goes on without it: nothing
     /// after restoration is worth keeping the app alive for. A stage that outlives the
@@ -139,7 +141,7 @@ final class QuitSupervisor {
             shortfall = .restorationTimedOut
         }
         if let shortfall {
-            guard mode == .powerOff else {
+            guard !mode.refusesUnrestored else {
                 timings.finish("cancelled")
                 return .cancel(shortfall)
             }
@@ -147,7 +149,8 @@ final class QuitSupervisor {
             case .restorationFailed(let text): text
             case .restorationTimedOut: "not finished after \(budgets.restoration.wholeMilliseconds) ms"
             }
-            log("quit: power off; desktop restoration unfinished (\(why)), the poster journal will finish it at the next launch")
+            let who = mode == .handover ? "update" : "power off"
+            log("quit: \(who); desktop restoration unfinished (\(why)), keeping recovery records")
         }
 
         let deadline = now().advanced(by: budgets.teardown)
@@ -210,9 +213,14 @@ final class QuitSupervisor {
 
 /// How a quit behaves, which depends on who asked for it.
 enum QuitMode: String, Equatable, Sendable {
-    /// The user, an update or an app: restoring the desktop may take its time, and when it
-    /// fails the quit is refused so the user can see why and try again.
+    /// The user or an app: restoring the desktop may take its time, and when it fails the
+    /// quit is refused so the user can see why and try again.
     case interactive
+    /// An update installer is waiting to replace the app and start the new version. Restoring
+    /// takes as long as an interactive quit's, but the quit never refuses: a refusal leaves
+    /// the installer waiting for good, so every later update fails the same way while the
+    /// state that refused stays. The new version takes over the recovery journals.
+    case handover
     /// macOS is logging out, restarting or shutting down. The system is waiting for this
     /// app, and a refusal cancels the logout for every app and shows the user a dialog, so
     /// the quit never refuses: it restores what it can in a short time and goes.
@@ -221,16 +229,20 @@ enum QuitMode: String, Equatable, Sendable {
     /// Pure, so every combination is exercised without a logout. The announcement counts
     /// as well as the reason because a signal that arrives during a shutdown has the
     /// reason `signal`, and it is still the shutdown that is waiting.
-    static func resolve(reason: QuitReason, powerOffNotified: Bool) -> QuitMode {
-        powerOffNotified || reason.isPowerOff ? .powerOff : .interactive
+    static func resolve(reason: QuitReason, powerOffNotified: Bool, updateInstallPending: Bool = false) -> QuitMode {
+        if powerOffNotified || reason.isPowerOff { return .powerOff }
+        return reason == .update || updateInstallPending ? .handover : .interactive
     }
 
     var budgets: QuitSupervisor.Budgets {
         switch self {
-        case .interactive: .interactive
+        case .interactive, .handover: .interactive
         case .powerOff: .powerOff
         }
     }
+
+    /// Whether a desktop that could not be restored refuses the quit.
+    var refusesUnrestored: Bool { self == .interactive }
 }
 
 /// What `applicationShouldTerminate` answers a request to quit.
@@ -247,12 +259,13 @@ enum QuitRequestAnswer: Equatable {
 
     /// `running` is the mode of the quit in progress, `nil` when none is.
     ///
-    /// A request from the system always waits for the quit in progress, and anything waits
-    /// for a power-off quit, which ends the process either way.
+    /// A request from the system or an update always waits for the quit in progress (refusing
+    /// would cancel the logout or strand the update), and anything waits for a quit that does
+    /// not refuse, which ends the process either way. Only a second user's quit is refused.
     static func answer(finished: Bool, running: QuitMode?, request: QuitMode) -> QuitRequestAnswer {
         if finished { return .terminateNow }
         guard let running else { return .start }
-        return request == .powerOff || running == .powerOff ? .wait : .refuse
+        return request.refusesUnrestored && running.refusesUnrestored ? .refuse : .wait
     }
 }
 

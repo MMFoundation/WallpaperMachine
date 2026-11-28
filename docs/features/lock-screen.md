@@ -645,13 +645,17 @@ A stale save is retried only where the selection still matches the pre-write val
 a different external choice is preserved and reported, never overwritten by a retry.
 The native journal is pruned only after confirmation, including partial restores.
 Cancellation or timeout leaves recovery information available for the next attempt.
-If restoration still fails after the wait, or takes longer than 20 seconds, quit is cancelled
-and an alert gives the error; it also stays in the menu bar (and native-feature status) so the
-user can retry. A failed activation also restores native selections. If that
+If restoration still fails after the wait, or takes longer than 20 seconds, a user's quit is
+cancelled and an alert gives the error; it also stays in the menu bar (and native-feature status) so the
+user can retry. An update's quit goes on instead and leaves the journal to the new version
+([updates](desktop-picture.md#updates)). A failed activation also restores native selections. If that
 restoration fails, the service keeps desktop ownership and poster synchronization
 stays suspended until restoration succeeds; the picture API's temporary stand-in
 must not become a new poster original. Live desktop playback is independent of this
-poster handoff.
+poster handoff. The poster ledger keeps a poster and its original while either the
+live journal or its archive can put it back, so a replay after relaunch can restore the
+user's picture even when desktop writing is switched off
+([the journal of originals](desktop-picture.md#the-journal-of-originals)).
 
 ## Background checks and recovery
 

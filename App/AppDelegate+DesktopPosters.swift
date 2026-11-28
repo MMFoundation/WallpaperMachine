@@ -81,7 +81,7 @@ extension AppDelegate {
     /// that a crash or an earlier run left behind is found in the journal and put back too.
     /// Idle while the animated lock screen has the desktop: the switch is locked then, and the
     /// native provider journals the poster as its own original.
-    func applyDesktopPicturePreference() {
+    func applyDesktopPicturePreference(afterNativeRecovery: Bool = false) {
         // Poster writing is optional: prepared windows stay on their own desktops either way.
         defer { spacePinning?.update() }
         guard store != nil, !shutdownInProgress, !shutdownComplete, restoringDesktopPicture == nil,
@@ -96,12 +96,12 @@ extension AppDelegate {
             }
             return
         }
-        guard !desktopPictureRestoreSettled else { return }
+        guard afterNativeRecovery || !desktopPictureRestoreSettled else { return }
         let folder = ClientPaths.desktopPostersURL
         let sync: DesktopWallpaperSync
         if let running = desktopWallpaperSync {
             sync = running
-        } else if DesktopWallpaperLedger.hasRecordedOriginals(in: folder) {
+        } else if DesktopWallpaperLedger.needsRecovery(in: folder, afterNativeRecovery: afterNativeRecovery) {
             do { sync = try DesktopWallpaperSync(folder: folder) } catch {
                 lastError = error
                 AppLog.error("Desktop picture could not be restored: \(error.localizedDescription)")

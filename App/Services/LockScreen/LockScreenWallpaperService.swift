@@ -178,8 +178,7 @@ final class LockScreenWallpaperService {
       },
       scenes: { try await bridge.lockScreenScenes() },
       wallpaperScenes: { try await bridge.nativeWallpaperScenes(wallpaperId: $0) },
-      selection: LockScreenWallpaperSelection(
-        folder: ClientPaths.supportURL.appendingPathComponent("LockScreen")),
+      selection: LockScreenWallpaperSelection(folder: ClientPaths.lockScreenURL),
       exchange: LockScreenConfiguration.exchangeDirectory,
       onlineDisplayIDs: LockScreenWallpaperService.onlineDisplays,
       playlistResolver: resolver,

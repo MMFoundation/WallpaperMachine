@@ -177,8 +177,6 @@ final class SoftwareUpdateController: NSObject, SPUUpdaterDelegate {
         defaults.set(now.addingTimeInterval(24 * 60 * 60), forKey: Self.deferredUntilKey)
     }
 
-    func quitWasCancelled() { isRelaunching = false }
-
     var isPresentingUpdate: Bool {
         controller != nil && NSApp.windows.contains { $0.isVisible && Self.owns($0) }
     }

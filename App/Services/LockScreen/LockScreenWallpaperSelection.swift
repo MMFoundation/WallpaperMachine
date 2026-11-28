@@ -64,8 +64,77 @@ final class LockScreenWallpaperSelection {
     self.init(
       storeURL: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(
         "Library/Application Support/com.apple.wallpaper/Store/Index.plist"),
-      journalURL: folder.appendingPathComponent("native-selection.plist"),
+      journalURL: folder.appendingPathComponent(Self.journalName),
       reload: { try await coordinator.reload() }, coordinator: coordinator)
+  }
+
+  static let journalName = "native-selection.plist"
+
+  /// Both the current journal and the last released fields can restore a picture. Cache only
+  /// the latest successful read of each file; a missing or unreadable file is checked again.
+  @MainActor
+  struct PictureReferences {
+    private let journal: URL
+    private var cached: [URL: (version: [Int], urls: Set<URL>)] = [:]
+
+    init(journal: URL) { self.journal = journal }
+
+    mutating func read() throws -> Set<URL> {
+      var urls = Set<URL>()
+      for file in [journal, LockScreenWallpaperSelection.restoredJournalURL(journal)] {
+        let version = LockScreenWallpaperSelection.storeVersion(file)
+        if let version, let hit = cached[file], hit.version == version {
+          urls.formUnion(hit.urls)
+          continue
+        }
+        cached[file] = nil
+        let data: Data
+        do { data = try Data(contentsOf: file) } catch let error as CocoaError
+          where error.code == .fileReadNoSuchFile || error.code == .fileNoSuchFile { continue }
+        var found = Set<URL>()
+        for entry in try LockScreenWallpaperSelection.decodeEntries(data) {
+          for node in [entry.original, entry.linkedOriginal, entry.inheritedOriginal].compactMap({ $0 }) {
+            let baseline = try LockScreenWallpaperSelection.decodeBaseline(node)
+            try LockScreenWallpaperSelection.collectPictureURLs(in: baseline, into: &found)
+          }
+        }
+        if let version { cached[file] = (version, found) }
+        urls.formUnion(found)
+      }
+      return urls
+    }
+  }
+
+  private static func decodeEntries(_ data: Data) throws -> [Entry] {
+    let entries = try PropertyListDecoder().decode([Entry].self, from: data)
+    guard Set(entries.map(\.path)).count == entries.count else {
+      throw LockScreenWallpaperFailure(message: String(localized: "The native wallpaper restoration journal is invalid."))
+    }
+    return entries
+  }
+
+  private static func decodeBaseline(_ data: Data) throws -> [String: Any] {
+    guard let node = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {
+      throw LockScreenWallpaperFailure(message: String(localized: "The native wallpaper restoration journal is invalid."))
+    }
+    return node
+  }
+
+  private static func collectPictureURLs(in value: Any, into urls: inout Set<URL>) throws {
+    if let choice = value as? [String: Any], choice["Provider"] as? String == "com.apple.wallpaper.choice.image" {
+      guard let data = choice["Configuration"] as? Data else { throw CocoaError(.fileReadCorruptFile) }
+      let configuration = try decodeBaseline(data)
+      if let relative = (configuration["url"] as? [String: Any])?["relative"] as? String,
+        let url = URL(string: relative), url.isFileURL {
+        urls.insert(url.standardizedFileURL)
+      } else if configuration["type"] as? String == "imageFile" {
+        throw CocoaError(.fileReadCorruptFile)
+      }
+    } else if let dictionary = value as? [String: Any] {
+      for child in dictionary.values { try collectPictureURLs(in: child, into: &urls) }
+    } else if let array = value as? [Any] {
+      for child in array { try collectPictureURLs(in: child, into: &urls) }
+    }
   }
 
   init(
@@ -96,12 +165,7 @@ final class LockScreenWallpaperSelection {
 
   private func recoverSelection() async throws {
     if FileManager.default.fileExists(atPath: journalURL.path) {
-      let recovered = try PropertyListDecoder().decode([Entry].self, from: Data(contentsOf: journalURL))
-      guard Set(recovered.map(\.path)).count == recovered.count else {
-        throw LockScreenWallpaperFailure(
-          message: String(localized: "The native wallpaper restoration journal is invalid."))
-      }
-      entries = recovered
+      entries = try Self.decodeEntries(Data(contentsOf: journalURL))
       readoptionNeedsPersistence = false
       hasPersistedJournal = true
       // A crash may occur after the store write but before its service reload.
@@ -228,13 +292,7 @@ final class LockScreenWallpaperSelection {
     }
     var originals: [[String]: [String: Any]] = [:]
     for entry in entries {
-      guard
-        let original = try PropertyListSerialization.propertyList(from: entry.original, format: nil)
-          as? [String: Any]
-      else {
-        throw LockScreenWallpaperFailure(
-          message: String(localized: "The native wallpaper restoration journal is invalid."))
-      }
+      let original = try Self.decodeBaseline(entry.original)
       originals[entry.path] = entry.path == Self.globalPath ? original : original.filter {
         entry.ownedFields.contains($0.key) || ($0.key == "Type" && (entry.typeOwned ?? true))
       }
@@ -280,25 +338,9 @@ final class LockScreenWallpaperSelection {
       }
       var node = existing ?? [:]
       var linkedOriginal: [String: Any]?
-      if let data = prior?.linkedOriginal {
-        guard let decoded = try PropertyListSerialization.propertyList(from: data, format: nil)
-          as? [String: Any]
-        else {
-          throw LockScreenWallpaperFailure(
-            message: String(localized: "The native wallpaper restoration journal is invalid."))
-        }
-        linkedOriginal = decoded
-      }
+      if let data = prior?.linkedOriginal { linkedOriginal = try Self.decodeBaseline(data) }
       var inheritedOriginal: [String: Any]?
-      if let data = prior?.inheritedOriginal {
-        guard let decoded = try PropertyListSerialization.propertyList(from: data, format: nil)
-          as? [String: Any]
-        else {
-          throw LockScreenWallpaperFailure(
-            message: String(localized: "The native wallpaper restoration journal is invalid."))
-        }
-        inheritedOriginal = decoded
-      }
+      if let data = prior?.inheritedOriginal { inheritedOriginal = try Self.decodeBaseline(data) }
       if prior == nil, !desired.isEmpty {
         if Self.defaultLinkedChoice(node) != nil {
           linkedOriginal = node
@@ -596,12 +638,7 @@ final class LockScreenWallpaperSelection {
   }
 
   private func readArchivedEntries() -> [Entry] {
-    guard let data = try? Data(contentsOf: Self.restoredJournalURL(journalURL)),
-      let archived = try? PropertyListDecoder().decode([Entry].self, from: data)
-    else { return [] }
-    // A malformed archive is optional recovery evidence, never a reason to trap.
-    guard Set(archived.map(\.path)).count == archived.count else { return [] }
-    return archived
+    (try? Self.decodeEntries(Data(contentsOf: Self.restoredJournalURL(journalURL)))) ?? []
   }
 
   private func archiveRemovedEntries(_ next: [Entry], archived: [Entry]) throws {
@@ -694,12 +731,7 @@ final class LockScreenWallpaperSelection {
     var originals: [[String]: [String: Any]] = [:]
     let archivedByPath = Dictionary(uniqueKeysWithValues: archived.map { ($0.path, $0.original) })
     for entry in entries {
-      guard let original = try PropertyListSerialization.propertyList(from: entry.original, format: nil)
-        as? [String: Any] else {
-        throw LockScreenWallpaperFailure(
-          message: String(localized: "The native wallpaper restoration journal is invalid."))
-      }
-      originals[entry.path] = original
+      originals[entry.path] = try Self.decodeBaseline(entry.original)
     }
     let displays = root["Displays"] as? [String: Any] ?? [:]
     let spaces = root["Spaces"] as? [String: Any] ?? [:]

@@ -93,10 +93,22 @@ final class QuitReasonTests: XCTestCase {
         XCTAssertEqual(Set(QuitReason.allCases.filter(\.isPowerOff)), [.logout, .restart, .shutdown])
     }
 
-    func testAUsersQuitAnUpdateAndAnUnknownReasonStayInteractive() {
-        for reason in QuitReason.allCases where !reason.isPowerOff {
+    func testAUsersQuitASignalAndAnUnknownReasonStayInteractive() {
+        for reason in QuitReason.allCases where !reason.isPowerOff && reason != .update {
             XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: false), .interactive, reason.rawValue)
         }
+    }
+
+    /// A refused update quit would leave the installer waiting for good, so an update hands over
+    /// to the new version instead of refusing.
+    func testAnUpdateIsAHandoverThatNeverRefuses() {
+        let mode = QuitMode.resolve(reason: .update, powerOffNotified: false)
+
+        XCTAssertEqual(mode, .handover)
+        XCTAssertFalse(mode.refusesUnrestored)
+        XCTAssertEqual(mode.budgets, QuitMode.interactive.budgets, "restoration has as long as a user's quit gives it")
+        XCTAssertTrue(QuitMode.interactive.refusesUnrestored)
+        XCTAssertFalse(QuitMode.powerOff.refusesUnrestored)
     }
 
     func testASignalDuringAnAnnouncedShutdownIsStillAPowerOffQuit() {
@@ -112,6 +124,15 @@ final class QuitReasonTests: XCTestCase {
         // The mode asks the announcement too, in case a reason is ever added that outranks it.
         XCTAssertEqual(QuitMode.resolve(reason: .user, powerOffNotified: true), .powerOff)
         XCTAssertEqual(QuitMode.resolve(reason: .update, powerOffNotified: true), .powerOff)
+    }
+
+    func testInstallerWaitingAtRefusalHandsOverWithoutAnotherQuitEvent() {
+        for reason in [QuitReason.user, .signal] {
+            XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: false, updateInstallPending: true),
+                           .handover)
+            XCTAssertEqual(QuitMode.resolve(reason: reason, powerOffNotified: true, updateInstallPending: true),
+                           .powerOff)
+        }
     }
 
     // MARK: What the session ledger keeps

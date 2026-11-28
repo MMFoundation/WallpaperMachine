@@ -210,6 +210,13 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
         try await store.reload()
     }
 
+    private var pictureReferences = LockScreenWallpaperSelection.PictureReferences(
+        journal: ClientPaths.lockScreenURL.appendingPathComponent(LockScreenWallpaperSelection.journalName))
+
+    func journaledPictureURLs() throws -> Set<URL> {
+        try pictureReferences.read()
+    }
+
     func referencedPictureURLs(targets: [DesktopPictureTarget]) throws -> Set<URL> {
         guard !targets.isEmpty, let contents = try storeContents() else { return [] }
         let displays = Set(targets.compactMap { target -> String? in

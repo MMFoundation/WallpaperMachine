@@ -49,6 +49,9 @@ protocol DesktopPictureWorkspace {
     func replaceStore(_ data: Data, expected: Data) throws
     /// Has WallpaperAgent load the store, which it reads only as it starts.
     func reloadStore() async throws
+    /// Picture files the lock screen can write back from its current or archived selections.
+    /// Throws when those references cannot be determined.
+    func journaledPictureURLs() throws -> Set<URL>
 }
 
 extension DesktopPictureWorkspace {
@@ -57,6 +60,7 @@ extension DesktopPictureWorkspace {
     func storeContents() throws -> Data? { nil }
     func replaceStore(_ data: Data, expected: Data) throws {}
     func reloadStore() async throws {}
+    func journaledPictureURLs() throws -> Set<URL> { [] }
 }
 
 @MainActor
@@ -146,6 +150,9 @@ final class DesktopWallpaperLedger {
     /// What each desktop last got in place of a missing original, so a
     /// restoration that is retried logs it once.
     private var reportedStandIns: [DesktopPictureTarget: URL] = [:]
+    private var journalReadForPass: Result<Set<URL>, Error>?
+    private var checkJournalBeforeWriting: Bool
+    private var reportedUnreadableJournal = false
 
     private struct Entry: Codable {
         var original: DesktopPicture
@@ -174,6 +181,7 @@ final class DesktopWallpaperLedger {
         } else {
             entries = [:]
         }
+        checkJournalBeforeWriting = !entries.isEmpty
         if FileManager.default.fileExists(atPath: storeSnapshotURL.path) {
             storeSnapshot = try JSONDecoder().decode(StoreSnapshot.self, from: Data(contentsOf: storeSnapshotURL))
         }
@@ -182,15 +190,15 @@ final class DesktopWallpaperLedger {
     /// Whether the journal in `folder` still names a poster whose original has not been put back,
     /// so a crash, a relaunch or a switched-off preference may have left one on a desktop, or the
     /// store copy is still there: its selections, or WallpaperAgent's reload of them, may not be
-    /// back yet. False for a missing, unreadable or empty journal and no store copy. Reads the
-    /// files only; nothing is created.
-    static func hasRecordedOriginals(in folder: URL) -> Bool {
+    /// back yet. After native recovery even an empty journal warrants one check: an earlier
+    /// version could have pruned the poster the lock screen just returned.
+    static func needsRecovery(in folder: URL, afterNativeRecovery: Bool = false) -> Bool {
         if FileManager.default.fileExists(atPath: folder.appendingPathComponent(storeSnapshotName).path) {
             return true
         }
         guard let data = try? Data(contentsOf: folder.appendingPathComponent(journalName)),
               let entries = try? JSONDecoder().decode([String: Entry].self, from: data) else { return false }
-        return !entries.isEmpty
+        return afterNativeRecovery || !entries.isEmpty
     }
 
     /// Submit a fresh frame to EVERY desktop on its display, without a Space
@@ -210,6 +218,7 @@ final class DesktopWallpaperLedger {
     private func transaction(_ operation: @escaping @MainActor () async throws -> Void) async throws {
         let drainedOperation = {
             self.checkedOriginalStore = false
+            defer { self.journalReadForPass = nil }
             do {
                 try await operation()
             } catch {
@@ -452,6 +461,7 @@ final class DesktopWallpaperLedger {
         // The same poster is still on its way; rewriting it would not land sooner.
         if unconfirmed[target]?.url == url { return }
         if !FileManager.default.fileExists(atPath: url.path) {
+            if checkJournalBeforeWriting, journaledPictureURLs() == nil { return }
             try image.write(to: url, options: .atomic)
         }
         // The store as the user left it, before the first poster since the last full
@@ -513,6 +523,10 @@ final class DesktopWallpaperLedger {
     /// does not exist, so writing such an original would fail on every attempt
     /// and refuse every quit. It gives way to the display's fallback and, when
     /// no original is left at all, to macOS's default picture.
+    ///
+    /// The same holds for a poster with no journal entry (one an earlier version
+    /// pruned while the lock screen's journal still named it): no retry can
+    /// recover an original for it, so it never refuses the quit either.
     private func restore(target: DesktopPictureTarget, fallbacks: () -> [String: DesktopPicture]) async throws {
         try Task.checkCancellation()
         guard let current = try workspace.currentPicture(target: target),
@@ -529,14 +543,18 @@ final class DesktopWallpaperLedger {
         let standIn: String
         if let chosen = fallbacks()[target.display] {
             (original, standIn) = (chosen, "another desktop's original")
-        } else if named != nil, let systemDefault = systemDefault() {
+        } else if named != nil || journaled == nil, let systemDefault = systemDefault() {
+            // A poster journaled with an inherited original is not given up: a later pass that
+            // can see the display's picture repairs that entry. One with no entry never can be.
             (original, standIn) = (systemDefault, "macOS's default picture")
         } else {
             throw Failure.originalUnavailable
         }
-        if let named, reportedStandIns[target] != original.url {
+        let lost = named.map { "no longer exists (\($0.url.path))" }
+            ?? (journaled == nil ? "was never recorded for poster \(current.url.lastPathComponent)" : nil)
+        if let lost, reportedStandIns[target] != original.url {
             reportedStandIns[target] = original.url
-            AppLog.warn("Desktop picture: the original of display \(target.display), desktop \(target.space ?? "current") no longer exists (\(named.url.path)); putting back \(standIn) \(original.url.path) instead")
+            AppLog.warn("Desktop picture: the original of display \(target.display), desktop \(target.space ?? "current") \(lost); putting back \(standIn) \(original.url.path) instead")
         }
         try recordWritten(original.url)
         try await workspace.setPicture(original, target: target)
@@ -622,7 +640,9 @@ final class DesktopWallpaperLedger {
     /// goes. Anywhere else an unseen desktop may still show one, so only posters
     /// older than the newest `retainedPostersPerIncompleteDisplay` go. A poster
     /// a readable desktop shows is never deleted, and entries of the legacy
-    /// journal, which name no display, are left alone.
+    /// journal, which name no display, are left alone. Nor is a poster the
+    /// lock screen's journal still names, with its entry: that journal puts the
+    /// poster back when it restores, and only this entry knows what was under it.
     private func removeUnreferencedPosters(targets: [DesktopPictureTarget]) throws {
         var targeted = Set<String>(), incomplete = Set<String>(), referenced = Set<String>()
         // A native-provider shutdown reloads WallpaperAgent asynchronously.
@@ -664,6 +684,11 @@ final class DesktopWallpaperLedger {
             obsolete += newestFirst.dropFirst(Self.retainedPostersPerIncompleteDisplay)
                 .filter { !referenced.contains($0) }
         }
+        if !obsolete.isEmpty {
+            guard let journaled = journaledPictureURLs() else { return }
+            let kept = Set(journaled.filter { entry(for: $0) != nil }.map(\.lastPathComponent))
+            obsolete.removeAll { kept.contains($0) }
+        }
         var removed = false
         var firstError: Error?
         for name in obsolete {
@@ -679,6 +704,25 @@ final class DesktopWallpaperLedger {
         }
         if removed { try save() }
         if let firstError { throw firstError }
+    }
+
+    private func journaledPictureURLs() -> Set<URL>? {
+        if let journalReadForPass { return try? journalReadForPass.get() }
+        let read = Result { try workspace.journaledPictureURLs() }
+        journalReadForPass = read
+        switch read {
+        case .success(let pictures):
+            reportedUnreadableJournal = false
+            checkJournalBeforeWriting = false
+            return pictures
+        case .failure(let error):
+            checkJournalBeforeWriting = true
+            if !reportedUnreadableJournal {
+                AppLog.warn("Desktop picture: the lock screen's recovery records could not be read (\(error.localizedDescription)); keeping existing posters and pausing new files until the records can be read")
+                reportedUnreadableJournal = true
+            }
+            return nil
+        }
     }
 
     /// When a poster file was last written; a missing file sorts oldest.

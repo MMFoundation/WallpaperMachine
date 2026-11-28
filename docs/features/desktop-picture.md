@@ -65,10 +65,10 @@ refresh, so a [settings backup](backup-restore.md) neither exports nor restores 
   while a restore runs waits for the restore to finish, then starts posters again.
 - **A poster left behind is found at launch.** With the switch off and no sync running,
   the launch (and the end of an animated lock screen) reads the journal
-  (`DesktopWallpaperLedger.hasRecordedOriginals`): if it still names an original or the
-  [store copy](#the-journal-of-originals) is still there, a sync that never starts restores it, for a poster that a crash or an earlier run with
-  the switch on left on a desktop. A desktop showing anything but a poster keeps its
-  choice, as on every restore.
+  (`DesktopWallpaperLedger.needsRecovery`). A recorded original or a remaining
+  [store copy](#the-journal-of-originals) triggers a restore without enabling poster writing.
+  After native recovery, even an empty poster journal triggers one check for a poster an
+  older version pruned. Desktops showing anything but a poster keep their choices.
 - **Animate lock screen decides.** While the lock screen is requested, or the native
   provider has the desktop, the extension owns the picture and journals the poster as
   its own original. The switch is then locked in the panel with the reason, the action
@@ -363,6 +363,21 @@ originals journal. An extension used only for the screen saver does not block po
 Apple's default image, aerials and other user-selected providers remain valid originals.
 The store is read once per such pass, not for ordinary updates to journaled posters.
 
+The reverse can happen: the lock screen's own journal (`<support>/LockScreen/native-selection.plist`)
+records whatever a desktop showed when the lock screen took it over, and that can be a
+poster. When the lock screen restores, it puts that poster back, and this ledger then
+writes the poster's original over it. A poster and its entry stay while either the live
+journal or the archive of released fields (`restored-native-selection.plist`) names it:
+WallpaperAgent can replay an old selection after the live journal is gone. The archive
+keeps the latest released choices per node, not every poster ever shown. A newer choice
+releases its predecessor; the next cleanup can then delete the old poster.
+
+A pass checks these files when it would delete a poster, or before creating a new one
+after a journal read failed or a ledger with existing entries reopened. Each journal is
+decoded only when its file changes. If either cannot be read, existing posters stay and
+new poster files pause rather than filling the disk. Desktops can still be restored.
+`AppLog` records the failure once; the next synchronization retries.
+
 Another app can delete a picture it set, as a wallpaper app clearing out its old
 downloads does, and macOS refuses to show a file that does not exist. Writing that
 original back would fail on every attempt and so refuse every quit. So whenever a
@@ -372,8 +387,10 @@ desktop gets the next original whose file is still there, in the order above (an
 desktop on its display, its effective image, its journal, another display's). When none
 is left it gets macOS's default picture
 (`/System/Library/CoreServices/DefaultDesktop.heic`, written as the file that link points
-to). `AppLog` records the missing file and what was put back instead. Only a definite "no
-such file" counts. A file the app may not look at, such as one in a folder macOS's
+to). `AppLog` records the missing file and what was put back instead. A poster with no
+journal entry at all (one an earlier version pruned while the lock screen's journal or
+archive still named it) takes the same fallbacks: no retry could find its original. Only a
+definite "no such file" counts. A file the app may not look at, such as one in a folder macOS's
 privacy protection covers, is written back as before. Files are looked at only while a
 desktop is being put back, never for each poster.
 
@@ -395,6 +412,12 @@ retried by the next pass or launch even though the store has nothing left to cha
 Settings meanwhile is kept, a snapshot entry that already named a poster or the app's
 native extension is never put back, and the store is written only if it is still the version just read. The copy is
 deleted once restoration succeeds.
+
+If WallpaperAgent later replays an archived poster after that copy was deleted, the
+poster entry still restores an image and its settings. It cannot reconstruct an aerial
+or other native provider from a still image alone. That later repair can leave the
+provider's still on the desktop; reselecting the provider in System Settings restores
+its animation.
 
 A desktop showing anything but a poster was changed outside the app and keeps that
 choice on restoration. When a display stops showing a live wallpaper, its desktops are
@@ -531,8 +554,8 @@ Restoration that is cut short loses nothing. `restoreForTermination` stops at th
 `originals.json` until its poster is no longer shown. The desktop may keep showing the last
 poster after the next login until the app runs again, and the original it replaced is still
 on record to put back, as after a crash ([the journal](#the-journal-of-originals)). The log
-says that the desktop restoration is unfinished and that the poster journal will finish it
-at the next launch (`quit: power off; desktop restoration unfinished (…)`). The session
+says that desktop restoration is unfinished and the recovery records are kept
+(`quit: power off; desktop restoration unfinished (…)`). The session
 ledger keeps `logout; desktop restoration unfinished` as the quit's reason, so the next
 launch's `previous session:` line reads `quit normally (logout; desktop restoration
 unfinished)` and not a crash.
@@ -546,7 +569,23 @@ A request to quit that arrives while another quit is running is answered by what
 a second user quit is refused, but a logout, restart or shutdown (and anything that arrives
 during one) waits for the quit that is running and is answered with it, so it is not
 refused either. If the user's quit then fails to restore, it is tried again once under the
-power-off limits instead of being refused.
+power-off limits instead of being refused. An update that asks while a user's quit runs is
+answered the same way. Before refusing a quit, the app checks whether Sparkle is now
+waiting to relaunch it. If so, it retries as an [update](#updates), even if AppKit has
+not delivered a second quit request.
+
+### Updates
+
+The quit Sparkle asks for when it installs an update and relaunches (`QuitReason.update`)
+runs as `QuitMode.handover`. It has the user's quit's limits, so restoration has as long as
+ever to finish, but like a logout it never refuses. A refused update quit leaves Sparkle
+waiting for an exit that never comes, and whatever refused it (an original that cannot be
+recovered) refuses the next update the same way, so no update could ever install. The new
+version starts at once and takes over the journals as after a logout: the lock screen
+recovers its selection, and the poster journal keeps every original it has not put back.
+With desktop picture writing on, posters go on and that journal restores them at a later
+quit; with it off, the launch repair restores them at once. The log says `quit: update;
+desktop restoration unfinished (…)`.
 
 ## The native lock-screen provider and Space selection
 
