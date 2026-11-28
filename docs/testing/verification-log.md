@@ -27,8 +27,8 @@ entry's recorded result is not allowed.
 
 ## 2026-11-28 — Update handover and lock-screen poster recovery
 
-- Focused native suite: DesktopWallpaperTests, LockScreenWallpaperTests, QuitReasonTests, QuitSupervisorTests, QuitRequestAnswerTests and PixivDeepBrowsingTests: 274 passed.
-- Final `python3 scripts/test.py` on Apple silicon, macOS 27.0.1 and Xcode 27.2: 37 Python modules passed; 5,444 native tests passed, 70 skipped, no failures. XCTest reported one runtime warning.
+- Local focused run: `python3 scripts/test.py --only DesktopWallpaperTests --only LockScreenWallpaperTests --only QuitReasonTests --only QuitSupervisorTests --only QuitRequestAnswerTests --only PixivDeepBrowsingTests` — exit 0; 274 passed.
+- Local full run on `d2ccb327` (Apple silicon, macOS 27.0.1, Xcode 27.2): `python3 scripts/test.py` — exit 0; all 37 Python modules passed. XCTest reported 5,444 passed, 0 failed and 70 skipped out of 5,514 in 123 seconds, with one runtime warning. These are not hosted CI results.
 - Regression coverage includes archive replay with poster writing off, already-pruned records, same-size atomic journal replacement, damaged baselines, bounded poster writes and installer requests during an existing quit.
 - Not exercised: a real Sparkle install, live desktop/lock-screen handback, or the opt-in asset and network cases. No Release app was built.
 
