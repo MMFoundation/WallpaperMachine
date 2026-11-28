@@ -383,7 +383,13 @@ final class DesktopWallpaperTests: XCTestCase {
         try Data([1]).write(to: old)
         let workspace = MemoryDesktopWorkspace()
         workspace.pictures = [one: .poster(old)]
-        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        // macOS's default picture is there, so the refusal below is the ledger's choice to wait
+        // for a repair, not a picture it could not find.
+        let system = root.appendingPathComponent("System", isDirectory: true)
+        try FileManager.default.createDirectory(at: system, withIntermediateDirectories: true)
+        let defaultPicture = system.appendingPathComponent("Default.heic")
+        try Data([0]).write(to: defaultPicture)
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace, systemDefaultPicture: defaultPicture)
         await XCTAssertThrowsErrorAsync(try await ledger.restoreAll(), "An empty original is not a successful restoration")
         XCTAssertTrue(workspace.writes.isEmpty)
         XCTAssertTrue(FileManager.default.fileExists(atPath: old.path))
