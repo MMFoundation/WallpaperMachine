@@ -370,9 +370,10 @@ writes the poster's original over it. So a poster stays, with its entry, for as 
 that journal names it, even while no desktop shows it: pruning it first left a poster
 nobody could restore, and quitting refused every time. The ledger reads that journal only
 when a pass would delete a poster, and again only once the file has changed (it can hold
-thousands of entries, one per Space macOS ever made). The journal's archive of released
-entries (`restored-native-selection.plist`) does not count: it is kept for good, and so
-would every poster it names.
+thousands of entries, one per Space macOS ever made). A journal that is there but cannot
+be read may name any poster, so none is deleted until it can be read again; `AppLog`
+says so once. The journal's archive of released entries (`restored-native-selection.plist`)
+does not count: it is kept for good, and so would every poster it names.
 
 Another app can delete a picture it set, as a wallpaper app clearing out its old
 downloads does, and macOS refuses to show a file that does not exist. Writing that

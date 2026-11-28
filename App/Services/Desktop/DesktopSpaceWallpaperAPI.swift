@@ -211,16 +211,17 @@ final class SystemDesktopPictureWorkspace: DesktopPictureWorkspace {
     }
 
     /// The lock-screen journal can hold thousands of entries (one per Space macOS ever made),
-    /// so it is read again only when its size or modification date changed.
+    /// so it is read again only when its size or modification date changed. Only a read that
+    /// succeeded is kept: one that failed is tried again at the next prune.
     private var journaled: (stamp: (Date?, Int?), urls: Set<URL>)?
     private let lockScreenFolder: URL = ClientPaths.lockScreenURL
 
-    func journaledPictureURLs() -> Set<URL> {
+    func journaledPictureURLs() throws -> Set<URL> {
         let file = lockScreenFolder.appendingPathComponent(LockScreenWallpaperSelection.journalName)
         let values = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
         let stamp = (values?.contentModificationDate, values?.fileSize)
         if let journaled, journaled.stamp == stamp { return journaled.urls }
-        let urls = values == nil ? [] : LockScreenWallpaperSelection.journaledPictureURLs(in: lockScreenFolder)
+        let urls = try LockScreenWallpaperSelection.journaledPictureURLs(in: lockScreenFolder)
         journaled = (stamp, urls)
         return urls
     }

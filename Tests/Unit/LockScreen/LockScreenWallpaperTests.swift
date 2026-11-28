@@ -123,13 +123,17 @@ final class LockScreenWallpaperTests: XCTestCase {
     let selection = LockScreenWallpaperSelection(
       storeURL: store, journalURL: folder.appendingPathComponent(LockScreenWallpaperSelection.journalName), reload: {})
 
-    XCTAssertTrue(LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty)
+    XCTAssertTrue(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty)
     try await selection.synchronize(desktopDisplays: ["one"], screenSaverDisplays: [])
-    XCTAssertEqual(LockScreenWallpaperSelection.journaledPictureURLs(in: folder), [poster.standardizedFileURL])
+    XCTAssertEqual(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder), [poster.standardizedFileURL])
 
     try await selection.synchronize(desktopDisplays: [], screenSaverDisplays: [])
-    XCTAssertTrue(LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty,
+    XCTAssertTrue(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder).isEmpty,
                   "once restored, the journal no longer holds the poster back")
+
+    // A journal that is there but cannot be read is not an empty one.
+    try Data("not a journal".utf8).write(to: folder.appendingPathComponent(LockScreenWallpaperSelection.journalName))
+    XCTAssertThrowsError(try LockScreenWallpaperSelection.journaledPictureURLs(in: folder))
   }
 
   @MainActor

@@ -72,7 +72,12 @@ private final class MemoryDesktopWorkspace: DesktopPictureWorkspace {
     func referencedPictureURLs(targets: [DesktopPictureTarget]) -> Set<URL> { persistedPictures }
     /// What the lock screen's journal would write back.
     var journaled: Set<URL> = []
-    func journaledPictureURLs() -> Set<URL> { journaled }
+    /// The lock screen's journal is there but cannot be read.
+    var journalUnreadable = false
+    func journaledPictureURLs() throws -> Set<URL> {
+        if journalUnreadable { throw CocoaError(.fileReadCorruptFile) }
+        return journaled
+    }
 
     /// macOS's wallpaper store, which a per-Space write changes along with the picture.
     var store: Data?
@@ -649,6 +654,26 @@ final class DesktopWallpaperTests: XCTestCase {
         XCTAssertEqual(workspace.pictures[one], user)
         XCTAssertTrue(try posterNames().isEmpty)
         XCTAssertFalse(DesktopWallpaperLedger.hasRecordedOriginals(in: root))
+    }
+
+    /// A lock-screen journal that cannot be read may name any poster, so none is pruned until it
+    /// can be read again; an empty one then lets them go.
+    @MainActor
+    func testAnUnreadableLockScreenJournalKeepsEveryPoster() async throws {
+        let workspace = MemoryDesktopWorkspace()
+        workspace.pictures = [one: original("user")]
+        let ledger = try DesktopWallpaperLedger(folder: root, workspace: workspace)
+        try await ledger.synchronize(posters: ["1": Data([1])], liveDisplays: ["1"])
+        let poster = try XCTUnwrap(workspace.pictures[one]?.url)
+        workspace.pictures[one] = try DesktopSpaceWallpaperAPI.decodePicture([:])
+
+        workspace.journalUnreadable = true
+        try await ledger.synchronize(posters: [:], liveDisplays: ["1"])
+        XCTAssertEqual(try posterNames(), [poster.lastPathComponent])
+
+        workspace.journalUnreadable = false
+        try await ledger.synchronize(posters: [:], liveDisplays: ["1"])
+        XCTAssertTrue(try posterNames().isEmpty)
     }
 
     /// Only a file that is certainly gone gives way. One the app may not look at, as in a

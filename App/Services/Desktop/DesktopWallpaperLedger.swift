@@ -50,8 +50,9 @@ protocol DesktopPictureWorkspace {
     /// Has WallpaperAgent load the store, which it reads only as it starts.
     func reloadStore() async throws
     /// Picture files another journal of originals (the lock screen's) will write back when it
-    /// restores. A poster among them is still in use, whatever the desktops show now.
-    func journaledPictureURLs() -> Set<URL>
+    /// restores. A poster among them is still in use, whatever the desktops show now. Throws
+    /// when that journal exists but cannot be read.
+    func journaledPictureURLs() throws -> Set<URL>
 }
 
 extension DesktopPictureWorkspace {
@@ -60,7 +61,7 @@ extension DesktopPictureWorkspace {
     func storeContents() throws -> Data? { nil }
     func replaceStore(_ data: Data, expected: Data) throws {}
     func reloadStore() async throws {}
-    func journaledPictureURLs() -> Set<URL> { [] }
+    func journaledPictureURLs() throws -> Set<URL> { [] }
 }
 
 @MainActor
@@ -150,6 +151,8 @@ final class DesktopWallpaperLedger {
     /// What each desktop last got in place of a missing original, so a
     /// restoration that is retried logs it once.
     private var reportedStandIns: [DesktopPictureTarget: URL] = [:]
+    /// The lock screen's journal could not be read at the last prune; logged once until it can.
+    private var reportedUnreadableJournal = false
 
     private struct Entry: Codable {
         var original: DesktopPicture
@@ -681,8 +684,19 @@ final class DesktopWallpaperLedger {
         // that poster and its entry first would leave a poster no one can restore. Asked only
         // when something would go, so ordinary passes do not read that journal.
         if !obsolete.isEmpty {
-            let journaled = Set(workspace.journaledPictureURLs().filter { entry(for: $0) != nil }.map(\.lastPathComponent))
-            obsolete.removeAll { journaled.contains($0) }
+            do {
+                let journaled = Set(try workspace.journaledPictureURLs().filter { entry(for: $0) != nil }
+                    .map(\.lastPathComponent))
+                obsolete.removeAll { journaled.contains($0) }
+                reportedUnreadableJournal = false
+            } catch {
+                // What it names is unknown, so nothing goes until it can be read again.
+                if !reportedUnreadableJournal {
+                    reportedUnreadableJournal = true
+                    AppLog.warn("Desktop picture: the lock screen's journal could not be read (\(error.localizedDescription)); keeping every poster until it can be")
+                }
+                obsolete.removeAll()
+            }
         }
         var removed = false
         var firstError: Error?

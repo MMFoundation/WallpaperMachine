@@ -76,16 +76,18 @@ final class LockScreenWallpaperSelection {
   /// must keep it and its original until this journal has restored it (see
   /// `DesktopWallpaperLedger.removeUnreferencedPosters`). The archive of released entries is
   /// left out: it is kept for good, and counting it would keep every such poster for good.
-  /// Empty for a missing or unreadable journal.
-  static func journaledPictureURLs(in folder: URL) -> Set<URL> {
-    guard let data = try? Data(contentsOf: folder.appendingPathComponent(journalName)),
-      let entries = try? PropertyListDecoder().decode([Entry].self, from: data)
-    else { return [] }
+  /// Empty when there is no journal. Throws for one that cannot be read, so the caller keeps
+  /// what it might name rather than taking it for an empty journal.
+  static func journaledPictureURLs(in folder: URL) throws -> Set<URL> {
+    let file = folder.appendingPathComponent(journalName)
+    let data: Data
+    do { data = try Data(contentsOf: file) } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+      return []
+    }
     var urls = Set<URL>()
-    for entry in entries {
+    for entry in try PropertyListDecoder().decode([Entry].self, from: data) {
       for node in [entry.original, entry.linkedOriginal, entry.inheritedOriginal].compactMap({ $0 }) {
-        guard let value = try? PropertyListSerialization.propertyList(from: node, format: nil) else { continue }
-        collectPictureURLs(in: value, into: &urls)
+        collectPictureURLs(in: try PropertyListSerialization.propertyList(from: node, format: nil), into: &urls)
       }
     }
     return urls
