@@ -83,8 +83,12 @@ Files are followed by their file id before their name: two files that swap names
 wallpapers. Renamed and changed files that replace many of a link's wallpapers at once are held
 for **Move to Trash** or **Keep** like departed files, and a file back under a name whose
 wallpaper was about to be replaced keeps that wallpaper and is imported over it once settled.
-A removal waits whenever the folder changed since the look that decided it; the next look
-decides again. A record that could not be read is read again at the next edit.
+A removal waits whenever the watcher reported a change to the folder since the look that
+decided it, or another look is queued; the next look decides again. The watcher collects a
+burst of changes for a quarter of a second first, so a file put back within that moment of a
+removal starting may come back as a new import rather than keep its wallpaper. On a
+case-sensitive library volume a wallpaper whose id differs only in case is never reclaimed,
+replaced or removed by a link. A record that could not be read is read again at the next edit.
 
 Quitting waits for the link records still being saved, so an import that finished just before
 the quit is still known to be the link's at the next launch.

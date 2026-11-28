@@ -88,9 +88,12 @@ enum LinkedFolderPlanner {
             } else if !entry.owned {
                 // Never copied over an item this link did not import.
                 entry.stamp = item.stamp
-            } else if item.libraryID.lowercased() != entry.libraryID.lowercased(),
-                      installedKeys.contains(item.libraryID.lowercased()) || claimed.contains(item.libraryID.lowercased()) {
-                // Renamed and changed onto an id another wallpaper has: never imported over it.
+            } else if item.libraryID != entry.libraryID,
+                      installed.contains(item.libraryID)
+                        || (item.libraryID.lowercased() != entry.libraryID.lowercased()
+                            && (installedKeys.contains(item.libraryID.lowercased()) || claimed.contains(item.libraryID.lowercased()))) {
+                // Renamed and changed onto an id another wallpaper has (on a case-sensitive volume,
+                // also one that differs only in case): never imported over it.
                 next.pending[item.path] = nil
             } else if settled(item, in: &next, plan: &plan) {
                 plan.imports.append(item)
@@ -99,22 +102,33 @@ enum LinkedFolderPlanner {
             entries.append(entry)
         }
 
+        // Ids of new files scheduled for import in this look.
+        var reserved = Set<String>()
         for item in unmatched {
             let key = item.libraryID.lowercased()
-            if let index = next.pendingRemovals.firstIndex(where: { $0.lowercased() == key }),
-               installed.contains(next.pendingRemovals[index]) {
+            // A wallpaper of the same id only in case that is installed separately (a case-sensitive
+            // volume) is somebody else's: the returning file never reclaims through it.
+            let reclaimable = { (id: String) in id == item.libraryID || !installed.contains(item.libraryID) }
+            if !reserved.contains(key), let index = next.pendingRemovals.firstIndex(where: { $0.lowercased() == key }),
+               installed.contains(next.pendingRemovals[index]), reclaimable(next.pendingRemovals[index]) {
                 // Back before its wallpaper was removed: it stays, and is imported over it once
                 // settled, since its contents may differ from what the library holds.
                 let id = next.pendingRemovals.remove(at: index)
                 entries.append(.init(path: item.path, libraryID: id, stamp: unknownStamp, fileID: item.fileID, owned: true))
                 claimed.insert(key)
-            } else if let index = next.heldRemovals.firstIndex(where: { $0.lowercased() == key }),
-                      installed.contains(next.heldRemovals[index]) {
+                plan.needsRecheck = true
+            } else if !reserved.contains(key), let index = next.heldRemovals.firstIndex(where: { $0.lowercased() == key }),
+                      installed.contains(next.heldRemovals[index]), reclaimable(next.heldRemovals[index]) {
                 // Back while its removal was held: it stays, is no longer asked about, and is
                 // imported over it once settled.
                 let id = next.heldRemovals.remove(at: index)
                 entries.append(.init(path: item.path, libraryID: id, stamp: unknownStamp, fileID: item.fileID, owned: true))
                 claimed.insert(key)
+                plan.needsRecheck = true
+            } else if reserved.contains(key) {
+                // Another new file of this id is being imported in this look: this one is looked at
+                // again next time, recorded as nobody's only once that import has landed.
+                continue
             } else if installedKeys.contains(key) || claimed.contains(key) {
                 // Somebody else's item of the same id: recorded, never replaced or removed.
                 entries.append(.init(path: item.path, libraryID: item.libraryID, stamp: item.stamp,
@@ -124,7 +138,7 @@ enum LinkedFolderPlanner {
             } else if settled(item, in: &next, plan: &plan) {
                 // Reserved, so a second new file of the same id in this look is not imported over it.
                 plan.imports.append(item)
-                claimed.insert(key)
+                reserved.insert(key)
             }
         }
 
@@ -170,20 +184,14 @@ enum LinkedFolderPlanner {
 
     /// The library items `record` has decided to remove and that are still installed: the
     /// wallpapers of files that left, and items no file stands for any more.
-    /// Ids are matched to the library's own spelling: on a volume that ignores case, a file
-    /// renamed only in case and imported again keeps the folder name the library already had.
-    /// One that matches several installed items only by case is left alone.
+    /// Only exact ids: a wallpaper that matches only by case may be somebody else's on a
+    /// case-sensitive volume. `recordImport` keeps the library's spelling, so the link's own ids
+    /// match exactly.
     static func dueRemovals(_ record: LinkedFolderRecord, installed: Set<String>) -> [String] {
         let keep = Set(record.entries.filter { $0.state != .leaving }.map { $0.libraryID.lowercased() })
-        let byKey = Dictionary(grouping: installed, by: { $0.lowercased() })
         var seen = Set<String>()
         return (record.entries.filter { $0.state == .leaving && $0.owned }.map(\.libraryID) + record.pendingRemovals)
-            .compactMap { id -> String? in
-                if installed.contains(id) { return id }
-                let matches = byKey[id.lowercased()] ?? []
-                return matches.count == 1 ? matches[0] : nil
-            }
-            .filter { !keep.contains($0.lowercased()) && seen.insert($0).inserted }
+            .filter { installed.contains($0) && !keep.contains($0.lowercased()) && seen.insert($0).inserted }
     }
 
     /// Never equal to a file's stamp: an entry that has it is imported over at its next settled look.
@@ -206,13 +214,19 @@ enum LinkedFolderPlanner {
         installedBefore: Set<String>, in record: inout LinkedFolderRecord
     ) {
         record.pending[item.path] = nil
-        guard let id = importedID else {
+        guard var id = importedID else {
             record.failed[item.path] = item.stamp
             return
         }
         record.failed[item.path] = nil
         let index = record.entries.firstIndex(where: { $0.path == item.path })
         let previous = index.map { record.entries[$0] }
+        // On a volume that ignores case, a file renamed only in case lands in the folder the
+        // library already had, under its old spelling: the entry keeps that spelling.
+        if let previous, previous.libraryID != id, previous.libraryID.lowercased() == id.lowercased(),
+           installedBefore.contains(previous.libraryID), !installedBefore.contains(id) {
+            id = previous.libraryID
+        }
         let wasThisFiles = previous.map { $0.owned && $0.libraryID.lowercased() == id.lowercased() } ?? false
         let owned = wasThisFiles || !installedBefore.contains { $0.lowercased() == id.lowercased() }
         let entry = LinkedFolderRecord.Entry(path: item.path, libraryID: id, stamp: item.stamp,
@@ -251,13 +265,15 @@ enum LinkedFolderPlanner {
     /// Removals one import batch queued for the items renamed and changed files replaced
     /// (`added`) are weighed with every other removal not yet confirmed. When together they need
     /// the user's go-ahead, the new ones are held as departed files' are.
-    static func holdReplacements(_ added: [String], in record: inout LinkedFolderRecord) {
+    /// While departed files' wallpapers already wait to be asked about (`alreadyHeld`), new ones
+    /// wait with them.
+    static func holdReplacements(_ added: [String], alreadyHeld: Int = 0, in record: inout LinkedFolderRecord) {
         guard !added.isEmpty else { return }
         let unconfirmed = record.entries.filter { $0.owned && $0.state == .leaving && $0.removalConfirmed != true }.count
         let total = record.entries.filter {
             $0.owned && ($0.state == .present || ($0.state == .leaving && $0.removalConfirmed != true))
         }.count
-        guard isMassRemoval(record.pendingRemovals.count + unconfirmed, of: total) else { return }
+        guard alreadyHeld > 0 || isMassRemoval(record.pendingRemovals.count + unconfirmed, of: total) else { return }
         let held = Set(added)
         record.pendingRemovals.removeAll { held.contains($0) }
         record.heldRemovals += added.filter { !record.heldRemovals.contains($0) }

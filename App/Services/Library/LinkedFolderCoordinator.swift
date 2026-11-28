@@ -260,12 +260,14 @@ final class LinkedFolderCoordinator {
         }
         var notReached = false
         var held: [String] = []
+        let heldDepartures = status(of: id).held.count
         commit(id) { link in
             let queuedBefore = Set(link.record.pendingRemovals)
             defer {
                 // Old items of renamed and changed files are weighed like departed files' wallpapers.
                 LinkedFolderPlanner.holdReplacements(
-                    link.record.pendingRemovals.filter { !queuedBefore.contains($0) }, in: &link.record)
+                    link.record.pendingRemovals.filter { !queuedBefore.contains($0) }, alreadyHeld: heldDepartures,
+                    in: &link.record)
                 held = link.record.heldRemovals
             }
             for item in items {
