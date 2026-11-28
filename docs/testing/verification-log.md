@@ -25,6 +25,13 @@ and moves whatever falls past ten verbatim into a monthly file under
 [archive/](archive/); promote anything durable before it goes. Editing an
 entry's recorded result is not allowed.
 
+## 2026-11-28 — Update handover and lock-screen poster recovery
+
+- Focused native suite: DesktopWallpaperTests, LockScreenWallpaperTests, QuitReasonTests, QuitSupervisorTests, QuitRequestAnswerTests and PixivDeepBrowsingTests: 274 passed.
+- Final `python3 scripts/test.py` on Apple silicon, macOS 27.0.1 and Xcode 27.2: 37 Python modules passed; 5,444 native tests passed, 70 skipped, no failures. XCTest reported one runtime warning.
+- Regression coverage includes archive replay with poster writing off, already-pruned records, same-size atomic journal replacement, damaged baselines, bounded poster writes and installer requests during an existing quit.
+- Not exercised: a real Sparkle install, live desktop/lock-screen handback, or the opt-in asset and network cases. No Release app was built.
+
 ## 2026-11-27 — Christmas seasonal look and Liquid Glass window appearance (#267)
 
 - Command: python3 scripts/brand.py --seasonal
@@ -100,13 +107,3 @@ entry's recorded result is not allowed.
 - test.py: PASS (36/36 Python suites / 731 tests; 5392 passed, 0 failed, 70 skipped of 5462 native tests in 171s)
 - verifier-w3b: PASS after fixing Rust restart persistence, stacked-Spaces SpacePosters protection, parked-Space render_scale reset, lower-quality floor, .wmpack autoApplyOnConnect guard, and lock-screen rotation cancellation
 - Gaps: Release .app not rebuilt (unrequested); opt-in UI/desktop/local-corpus/WE-VM visual checks not run; 3 pre-existing XCTest main-thread runtime warnings in signature/keychain tests
-
-## 2026-11-25 — Wave 3A Parallax power fix, Automation/Intents, Smart Playlists, and Media Widgets (#24, #17a, #20, #19, #18)
-
-- Scope: Parallax static subgraph cache & on-demand easing convergence (#24), display-topology auto-layout (#17a), query/action App Intents + status.json + extended hotkeys + Presentation Mode (#20), wallpaper metadata + Smart Playlists + skip-recent + weighted shuffle + Sleep Timer (#19), Now Playing & Image Sticker widgets + per-wallpaper/Space scope (#18).
-- python3 scripts/build.py --renderer-only -> PASS (0 diff in App/Bridge/Generated/).
-- python3 scripts/check_renderer.py -> PASS (all C++ tests incl. 9 new parallax/on-demand/timer/NodeBinding tests + 12 generated GPU parity checks pixels_equal=True, diagnostics=0, reload cycles 0; 7 opt-in local asset/corpus tests skipped).
-- python3 scripts/check_rust.py -> PASS (core 436, bridge 992, core-integration 20, shader 1094; 0 failed; opt-in desktop/media/network disabled).
-- python3 scripts/test.py -> PASS (36/36 Python suites OK; 5343 passed, 0 failed, 70 skipped of 5413 native tests in 175s).
-- Localization & review: App/Resources/Localizable.xcstrings edited as text (+131 net keys across en/ja/ko/pt-BR/zh-Hans/zh-Hant); verifier-w3a PASS after resolving 3 blockers (sticker test/undo isolation, sleep timer pause cancel, Presentation Mode async re-entrancy).
-- Not run: Release .app build (not requested), desktop UI tests (--ui), live Steam/media opt-ins, and live macOS visual/energy inspection of parallax reuse, Now Playing widget, and display hotplug.
