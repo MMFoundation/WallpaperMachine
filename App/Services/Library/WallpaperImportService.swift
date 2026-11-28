@@ -46,6 +46,18 @@ actor WallpaperImportService {
     /// Library ids of imported pictures start with this, so the panel can tell a still image
     /// it packaged from a web wallpaper someone wrote.
     static let imageIDPrefix = "image-"
+
+    /// The library id an import gives a source of this name, before any duplicate policy: a
+    /// folder keeps its name (unless its manifest names the Workshop item it copies, see
+    /// `Report.recognizedWorkshopIDs`), a picture is `image-<name>`, a video or web page
+    /// `local-<name>`. Nil for a file the import does not take.
+    static func libraryID(forSourceNamed name: String, isDirectory: Bool) -> String? {
+        if isDirectory { return name }
+        let ext = (name as NSString).pathExtension.lowercased()
+        if imageExtensions.contains(ext) { return imageIDPrefix + name }
+        if videoExtensions.contains(ext) || webExtensions.contains(ext) { return "local-" + name }
+        return nil
+    }
     nonisolated static let stagingPrefix = ".WallpaperMachine-import-"
     nonisolated static let stagingOwnerName = ".owner"
     nonisolated private static let stagingOwnerMarker = Data("WallpaperMachine local import v1\n".utf8)

@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Settings › Library & Steam: where wallpapers live, SteamCMD, the shared scene resources, the
+/// Settings › Library & Steam: where wallpapers live, the folders the library follows, SteamCMD, the shared scene resources, the
 /// Workshop updates check, how many downloads run at once, and the Steam account.
 struct LibrarySettingsSection: View {
   private static let folder = SettingsItem.Group("folder")
+  private static let linked = SettingsItem.Group("linked-folders", title: "Linked folders")
   private static let steamCMD = SettingsItem.Group("steamcmd", title: "SteamCMD")
   private static let scene = SettingsItem.Group("scene", title: "Shared scene resources")
   private static let updates = SettingsItem.Group("updates", title: "Workshop updates")
@@ -13,6 +14,12 @@ struct LibrarySettingsSection: View {
   static let libraryFolder = SettingsItem(
     id: "library.folder", section: .library, group: folder, title: "Wallpaper library",
     keywords: ["Show in Finder", "Change in Storage…"])
+
+  static let linkedFolders = SettingsItem(
+    id: "library.linked-folders", section: .library, group: linked, title: "Link a folder",
+    note:
+      "Wallpapers you put in a linked folder are added to the library. With Mirror deletions on, a file you delete there leaves the library too; otherwise its wallpaper stays.",
+    keywords: ["Link Folder…", "Mirror deletions", "Unlink"])
 
   static let steamStatus = SettingsItem(
     id: "library.steamcmd-status", section: .library, group: steamCMD, title: "Installation",
@@ -83,13 +90,14 @@ struct LibrarySettingsSection: View {
     keywords: ["Wallpaper Engine on Steam", "macOS app security"])
 
   static let items = [
-    libraryFolder, steamStatus, steamActions, steamCandidate, sceneStatus, sceneActions,
+    libraryFolder, linkedFolders, steamStatus, steamActions, steamCandidate, sceneStatus, sceneActions,
     updatesDaily, updatesCheck, downloadsAtOnce, steamAccount, workshopAccount, context,
   ]
 
   var body: some View {
     SettingsPage(.library) {
       SettingsGroup(Self.folder, in: .library) { LibraryFolderRow() }
+      SettingsGroup(Self.linked, in: .library) { LibraryLinkedFolderRows() }
       SettingsGroup(Self.steamCMD, in: .library) { LibrarySteamCMDRows() }
       SettingsGroup(Self.scene, in: .library) { LibrarySceneRows() }
       SettingsGroup(Self.updates, in: .library) { LibraryUpdatesRows() }
@@ -130,6 +138,96 @@ private struct LibraryFolderRow: View {
         .disabled(controller.isStoreBusy)
       }
     }
+  }
+}
+
+// MARK: - Linked folders
+
+/// One row per linked folder, the go-ahead a mass removal waits for under it, and Link Folder….
+private struct LibraryLinkedFolderRows: View {
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let rows = controller.linkedFolderRows
+    ForEach(rows) { row in
+      LinkedFolderRowView(row: row)
+    }
+    let linkKey = PanelActionCoordinator.key("linkFolder")
+    DisplaysRow(item: LibrarySettingsSection.linkedFolders, note: rows.isEmpty ? nil : "", labelsControl: false) {
+      Button("Link Folder…") {
+        controller.launch(linkKey) { try await controller.linkFolder() }
+      }
+      .disabled(controller.isBusy(linkKey))
+      .accessibilityIdentifier("library.linkedFolders.link")
+    }
+  }
+}
+
+private struct LinkedFolderRowView: View {
+  let row: LinkedFolderRow
+
+  @Environment(PanelController.self) private var controller
+
+  var body: some View {
+    let id = row.id.uuidString
+    DisplaysRow(
+      item: LibrarySettingsSection.linkedFolders, title: row.path, note: "", details: details,
+      isPath: true, warnings: warnings, identity: id, labelsControl: false
+    ) {
+      HStack(spacing: 8) {
+        Toggle(
+          "Mirror deletions",
+          isOn: Binding(
+            get: { row.mirrorsDeletions },
+            set: { on in
+              controller.launch(PanelActionCoordinator.key("linkedFolderMirror", id: id), policy: .latestWins) {
+                try await controller.setLinkedFolderMirrorsDeletions(on, for: row.id)
+              }
+            })
+        )
+        .toggleStyle(.switch)
+        Button("Unlink") {
+          controller.launch(PanelActionCoordinator.key("unlinkFolder", id: id)) {
+            try await controller.unlinkFolder(row.id)
+          }
+        }
+      }
+    }
+    if row.heldCount > 0 {
+      DisplaysRow(
+        item: LibrarySettingsSection.linkedFolders,
+        title: L("\(row.heldCount) wallpapers left this folder at once. Move them to the Trash too?"),
+        note: "", identity: id + ".held", labelsControl: false
+      ) {
+        HStack(spacing: 8) {
+          Button("Move to Trash", role: .destructive) {
+            controller.launch(PanelActionCoordinator.key("linkedFolderRemoveHeld", id: id)) {
+              try await controller.removeHeldLinkedFolderWallpapers(row.id)
+            }
+          }
+          Button("Keep") {
+            controller.launch(PanelActionCoordinator.key("linkedFolderKeepHeld", id: id)) {
+              try await controller.keepHeldLinkedFolderWallpapers(row.id)
+            }
+          }
+        }
+      }
+    }
+  }
+
+  private var details: [String] {
+    var lines = [L("\(row.wallpaperCount) wallpapers")]
+    if row.missingCount > 0 { lines.append(L("\(row.missingCount) kept after leaving the folder")) }
+    return lines
+  }
+
+  private var warnings: [String] {
+    var lines: [String] = []
+    if row.isUnavailable {
+      lines.append(L("The folder can’t be read right now. Nothing is removed until it’s back."))
+    }
+    if let failure = row.failure { lines.append(failure) }
+    return lines
   }
 }
 

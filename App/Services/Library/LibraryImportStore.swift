@@ -49,6 +49,18 @@ final class LibraryImportStore {
         task = Task { [weak self] in await self?.run(sources, duplicates: duplicates) }
     }
 
+    /// Imports `sources` as `start` does, shown in the panel like any import, and answers its
+    /// report once the library has been rescanned: what a linked folder imports with. Throws when
+    /// an import is already running or this one could not finish.
+    func importAndWait(_ sources: [URL], duplicates: WallpaperImportService.DuplicatePolicy) async throws
+        -> WallpaperImportService.Report {
+        guard !sources.isEmpty else { return WallpaperImportService.Report() }
+        try start(sources, duplicates: duplicates)
+        await task?.value
+        if let report { return report }
+        throw WallpaperActionError(message: failure ?? String(localized: "Import could not finish"))
+    }
+
     func cancel() {
         guard let task else { return }
         task.cancel()

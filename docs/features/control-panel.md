@@ -1210,7 +1210,9 @@ into the library and leave the originals untouched, with a duplicate policy of
 **Skip duplicates**, **Keep both copies** or **Replace if changed**. Closing a
 popover, or the window,
 never cancels work: `LibraryImportStore` runs the import for the app, not for the
-page. Quitting cancels and awaits an active local import.
+page. Quitting cancels and awaits an active local import. A folder linked in Settings →
+Library & Steam is imported from the same way whenever it gains a file
+([linked folders](linked-folders.md)).
 
 An import takes Wallpaper Engine project folders, a Steam library, a Wallpaper
 Engine folder, a project's own files, videos (`mp4`, `m4v`, `mov`, `webm`, `mkv`,
